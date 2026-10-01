@@ -289,7 +289,6 @@ static int lz4k_decompress_hc(const unsigned char *in, size_t in_len, unsigned c
                 } while (litlen > 0);
             }
 
-break_literal:
             if (__builtin_expect(!!(op == op_end), 0) )
                 break;
         } else {
