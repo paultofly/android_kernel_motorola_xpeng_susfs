@@ -165,3 +165,111 @@ AnyKernel3 zip 可在自定义 recovery 或 Kernel Flasher 应用刷入(会同�
 
 1. `598721d8bbca` — Update ReSukiSU to v4.2.0-rc3-21-g542f9061 (origin/main)
 2. (本提交)— 新增 `docs/BUILD_LOG.md`(本文)及校验和/配置/日志归档
+---
+
+## 九、第二轮:BBRv3 / TCP Brutal / NoMount / USER_NS / LZ4K 移植与增量编译(2026-10-02)
+
+> 记录时间:2026-10-02 · 编译模式:**incr 增量** · 范围:**仅 boot,跳过 WiFi**(`BUILD_WLAN=false`)
+> 详细特性说明见 [`docs/FEATURE_PORTS.md`](../FEATURE_PORTS.md);本轮完整日志见 [`docs/xpeng_build6_features.log.xz`](../xpeng_build6_features.log.xz)。
+
+### 9.1 任务与结果
+
+| # | 任务 | 参考 | 结果 |
+|---|------|------|------|
+| 1 | BBR / BBRv3 支持 | LuoJuly sm7325(经 paulcbfly 8972cd10 搬运) | ✅ `CONFIG_DEFAULT_TCP_CONG="bbr"` |
+| 2 | TCP Brutal 移植 | apernet/tcp-brutal v2.0.1(参考 NonGKI 项目适配思路) | ✅ `CONFIG_TCP_CONG_BRUTAL=y` |
+| 3 | DroidSpaces 的 USER_NS | paulcbfly/xpeng_kernel_susfs 26427f8 | ✅ `CONFIG_USER_NS=y` |
+| 4 | 最新 NoMount 模块适配 | maxsteeel/nomount(dev) | ✅ `CONFIG_NOMOUNT=y` |
+| 5 | 华为 LZ4KD / LZ4K | meizuosc/m75 `lib/lz4k` | ✅ `CONFIG_LZ4K=y` |
+
+> 重要事实:参考内核(LuoJuly sm7325、paulcbfly)中 **并不存在** `CONFIG_TCP_CONG_BRUTAL` 的 Kconfig 定义,
+> 其 `CONFIG_TCP_CONG_BRUTAL=y` 是未定义符号,会被 kconfig 静默丢弃。本轮的 TCP Brutal 是真正从
+> apernet/tcp-brutal 回移到 5.4 的实现(见 FEATURE_PORTS.md)。
+
+### 9.2 源码坐标
+
+| 项目 | 值 |
+|------|---|
+| 特性代码提交 | `c1024a5d2b71`(BBRv3/Brutal/NoMount/LZ4K 代码与 Kconfig、Makefile) |
+| 特性配置提交 | `3fca8fbbed34`(ext_config:USER_NS/BBR/Brutal/NoMount/LZ4K) |
+| 警告修复提交 | `af3d05205bde`(brutal_cc/lz4k 移位)、`9846983ce199`(lz4k 死标签) |
+| 最终构建 HEAD | `9846983ce199`,annotated tag `susfs2.3-droidspace-rekernel` 精确匹配 |
+| 内核版本字符串 | **`5.4.302-moto`**(无 `-dirty`、无 SCM 后缀) |
+| ReSukiSU | `v4.2.0-rc3-21-g542f9061`(版本码 35192,未改动) |
+
+### 9.3 时间线(共三次尝试)
+
+| 尝试 | 起始 | 结束 | 结果 |
+|------|------|------|------|
+| #1 | 02:39:36 | 02:53:30 | ❌ `brutal_cc.o`/`lz4k_decompress.o` 触发禁用警告 |
+| #2 | 02:56:41 | 02:56:11* | ❌ `lz4k_decompress.c` unused label |
+| #3 | 02:56:41 | 03:03:05 | ✅ **成功** |
+
+\* #2 与 #3 起始时间为日志所示(第二次运行很快即失败)。成功轮分段耗时:
+
+| 阶段 | 耗时 |
+|------|------|
+| generate_defconfig | 11 s |
+| defconfig + olddefconfig | 4 s |
+| headers_install | 2 s |
+| **Compiling Image(-j16)** | **5 min 49 s** |
+| repack boot_ksu.img | 2 s |
+| AnyKernel3 打包 | 15 s |
+| **成功轮总计** | **≈6 min 24 s** |
+
+> 注:因本树开启 `ftrivial-auto-var-init`/ThinLTO/CFI,配置变化会更新 `autoconf.h` 触发大范围重编,
+> 故"增量"仍主要体现为复用 `.o` 与跳过全量清理,而非只编译改动文件。
+
+### 9.4 本轮遇到的问题
+
+1. **ext_config 被构建脚本静默还原**:构建脚本的 `apply_nfc_overlay`/`restore_nfc_config`(EXIT trap)会执行
+   `git checkout HEAD -- arch/arm64/configs/vendor/ext_config/moto-lahaina-xpeng.config`。首次配置校验时
+   该文件的新增块尚未提交,被直接还原,导致 USER_NS/BBR/Brutal/LZ4K 全部"看似无效"。
+   **结论:必须先提交改动再构建**(这也同时满足无 `-dirty` 的要求)。
+2. **禁用警告**:`scripts/gcc-wrapper.py` 把**任何**编译器警告都当作致命错误。本轮依次修复:
+   - `net/ipv4/brutal_cc.c`:C99 `for (int i...)\" 在 `-std=gnu89` 下触发 `-Wgcc-compat`,改为先声明 `int i`;
+   - `lib/lz4k/lz4k_decompress.c`:`>> bits + 1` 触发 `-Wshift-op-parentheses`,改为 `>> (bits + 1)`;
+   - `lib/lz4k/lz4k_decompress.c`:无用标签 `break_literal` 触发 `-Wunused-label`,删除。
+3. **构建脚本改造**:为满足增量编译与快速校验,新增 `INCREMENTAL=true`(跳过 `rm -rf OUT_DIR`)
+   与 `CONFIG_ONLY=true`(olddefconfig 后打印关键符号并退出)。默认关闭,不影响原有全量流程。
+
+### 9.5 验证结果
+
+| 验证项 | 结果 |
+|--------|------|
+| `include/config/kernel.release` | ✅ `5.4.302-moto` |
+| Image 内嵌版本字符串 | ✅ `5.4.302-moto SMP preempt mod_unload modversions aarch64` |
+| `boot_ksu.img` 内嵌内核 == `Image` | ✅ magiskboot unpack 后 SHA-256 逐字节一致 |
+| BBRv3 符号 | ✅ vmlinux 含 `bbr_main`/`bbr_min_tso_segs`/`bbr_sndbuf_expand` 等 |
+| TCP Brutal 符号 | ✅ vmlinux 含 `brutal_get_version`/`brutal_group_alloc`/`brutal_apply_rule` 等(20 处) |
+| NoMount 符号 | ✅ vmlinux 含 `nomount_hijack_dentry_ops`/`nomount_emit_virtual_children` 等(20 处) |
+| LZ4K 符号 | ✅ vmlinux 含 `lz4k_compress`/`lz4k_decompress_safe`/`lz4k_decompress_ubifs`(14 处) |
+| USER_NS | ✅ vmlinux 含 `create_user_ns`;`CONFIG_USER_NS=y` |
+| 关键配置 | ✅ USER_NS/NOMOUNT/LZ4K/TCP_CONG_BBR/TCP_CONG_BRUTAL/DEFAULT_BBR/`DEFAULT_TCP_CONG="bbr"`/`NET_SCH_FQ=y` |
+| 默认 qdisc | ⚠️ 保持 `pfifo_fast`(未设 `DEFAULT_NET_SCH`);原因见 FEATURE_PORTS.md §2.3(保护 rmnet 移动数据) |
+
+### 9.6 产物(构建仓 `.ci-work/edge-s30/release/`)
+
+| 文件 | 大小 | SHA-256 |
+|------|------|---------|
+| `boot_ksu.img` | 96M | `c1017f736212fa5439909a1813830e448f14eba90c1cc3aa4ac872db8dae963c` |
+| `Image` | 42M | `531d5c891184e4bae3244b6efa4fada02dcaae15c86a7c55914967f5f031a06f` |
+| `AnyKernel3-xpeng-EdgeS30-ReSukiSU-5.4.302-v4.2.0-rc3-21-g542f9061-S3RXC32.33-8-25.zip` | 32M | `91eb5481a1c415e43265fa2cd0c2f25204bda30c44c16e86849db83e52780f7f` |
+
+> WiFi 模块本轮未重编(`BUILD_WLAN=false`),故未生成新的 `wlan_crc_match_ksu.zip`;
+> 因 vermagic 仍为 `5.4.302-moto`,厂商 WiFi 模块可正常加载。
+
+### 9.7 刷入
+
+```bash
+fastboot boot boot_ksu.img     # 先临时验证
+fastboot flash boot boot_ksu.img
+```
+
+### 9.8 本轮新增/更新文件
+
+- 代码:`net/ipv4/tcp_bbr.c`、`net/ipv4/tcp_rate.c`、`include/net/tcp.h`、`net/ipv4/brutal.{h,c,*}`、`net/ipv4/{Kconfig,Makefile}`、
+  `fs/nomount/*`、`fs/{Kconfig,Makefile}`、`lib/lz4k/*`、`include/linux/lz4k.h`、`lib/{Kconfig,Makefile}`、`arch/arm64/configs/vendor/ext_config/moto-lahaina-xpeng.config`。
+- 文档:`docs/FEATURE_PORTS.md`、`docs/BUILD_LOG.md`(本节)、`docs/edge-s30.config`、`docs/SHA256SUMS.txt`、`docs/xpeng_build6_features.log.xz`。
+- 构建仓:`scripts/ci/build_resukisu_boot.sh` 新增 `INCREMENTAL` / `CONFIG_ONLY` 开关。
+

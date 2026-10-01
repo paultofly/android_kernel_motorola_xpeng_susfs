@@ -1,4 +1,5 @@
-0a0c880d523517fad270895c4c85d6aabe74f87ebd49cbd44d7b71204cd4243b  boot_ksu.img
-a63d9a203622ca4c4893aa5e3d689e20fd3ac9b6ae91df8035129c4a2ab8c821  AnyKernel3-xpeng-EdgeS30-ReSukiSU-5.4.302-v4.2.0-rc3-21-g542f9061-S3RXC32.33-8-25.zip
-3af655a97bcd3a056238822b513735fa95fb21a0c57b7feab4f469c2d851c077  Image
-2b7cb30eb44de022a36f87db917bb7819281a319a3186431a3fa281217ece876  wlan_crc_match_ksu.zip
+531d5c891184e4bae3244b6efa4fada02dcaae15c86a7c55914967f5f031a06f  Image
+c1017f736212fa5439909a1813830e448f14eba90c1cc3aa4ac872db8dae963c  boot_ksu.img
+91eb5481a1c415e43265fa2cd0c2f25204bda30c44c16e86849db83e52780f7f  AnyKernel3-xpeng-EdgeS30-ReSukiSU-5.4.302-v4.2.0-rc3-21-g542f9061-S3RXC32.33-8-25.zip
+# 说明:本轮为仅 boot 的增量编译(BUILD_WLAN=false),未重新打包 wlan_crc_match_ksu.zip;
+# 仓库中该 zip 仍为 2026-10-01 全量构建产物,内核 vermagic 同为 5.4.302-moto。
