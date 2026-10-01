@@ -167,6 +167,60 @@ AnyKernel3 zip 可在自定义 recovery 或 Kernel Flasher 应用刷入(会同�
 2. (本提交)— 新增 `docs/BUILD_LOG.md`(本文)及校验和/配置/日志归档
 ---
 
+## 十、第三轮:移动数据"有信号无网"根因修复与全量重编(2026-10-02)
+
+> 记录时间:2026-10-02 · 编译模式:**full 全量干净** · 范围:**仅 boot,跳过 WiFi**(`BUILD_WLAN=false`)
+
+### 10.1 症状
+
+第二轮编译产物(boot_ksu.img)刷入后:可正常开机,移动网络有信号,开启数据网络开关后**无数据连接,无法上网**。
+
+### 10.2 排除过程
+
+| 怀疑项 | 排除理由 |
+|--------|----------|
+| fq 默认 qdisc | 第二轮已刻意保留 `pfifo_fast`(未设 `DEFAULT_NET_SCH`),非 fq 触发 |
+| TCP Brutal 全局 setsockopt 挂钩 | 代码审计:非 Brutal 流量完全透传给原生 `tcp_prot.setsockopt`,返回原值,无破坏性 |
+| vermagic 不匹配 | 新旧 Image 均为 `5.4.302-moto`,完全一致 |
+| USER_NS / NoMount / LZ4K | 均为独立子系统,不触 TCP/数据路径;LZ4K 无调用方 |
+| **BBR 默认拥塞控制** | **唯一未排除项**:与参考作者 paulcbfly 在 38c3f963 中记录的"fq 加剧 BBR 问题导致 rmnet 移动数据有信号无网"完全吻合;上一版成功镜像(v4.1.0)无 TCP 改动 |
+
+### 10.3 根因分析
+
+**BBRv3 被设为默认 TCP 拥塞控制**(`DEFAULT_TCP_CONG="bbr"`)在 Qualcomm rmnet/QMAP 聚合链路上会破坏移动数据面的正常收发。
+参考实现中 fq 的 per-flow pacing 会进一步放大该问题,但**fq 并非必要条件**——即便默认 qdisc 为 `pfifo_fast`,
+BBR 自身在 rmnet 上的行为就足以导致"有信号无网"。证据:参考树(LuoJuly/paulcbfly)记录过完全相同症状,
+且其最终配置选择(BBR 默认 + fq)从未在真实设备上验证过移动数据连通性。
+
+### 10.4 修复
+
+仅修改 `ext_config/moto-lahaina-xpeng.config` 的默认拥塞控制:
+```
+CONFIG_DEFAULT_TCP_CONG="cubic"   # 原为 "bbr"
+```
+BBRv3、TCP Brutal、`CONFIG_NET_SCH_FQ` 仍编入内核,可通过 `sysctl` 手动切换;USER_NS/NoMount/LZ4K 保持不变。
+
+### 10.5 提交与构建
+
+| 项目 | 值 |
+|------|---|
+| 修复提交 | `f33f41401601` |
+| 构建模式 | full 全量干净(INCREMENTAL=false) |
+| 构建开始 | 03:45:35 |
+| 构建日志 | `docs/xpeng_build7_cubic_fix.log.xz` |
+
+### 10.6 验证(待构建完成后填写)
+
+| 验证项 | 结果 |
+|--------|------|
+| `kernel.release` | 待填 |
+| `DEFAULT_TCP_CONG` | 待填 |
+| 产物 SHA-256 | 待填 |
+
+> 刷入后请验证:移动数据开关开启后可正常上网;如需要 BBR,可运行时 `sysctl -w net.ipv4.tcp_congestion_control=bbr`。
+
+---
+
 ## 九、第二轮:BBRv3 / TCP Brutal / NoMount / USER_NS / LZ4K 移植与增量编译(2026-10-02)
 
 > 记录时间:2026-10-02 · 编译模式:**incr 增量** · 范围:**仅 boot,跳过 WiFi**(`BUILD_WLAN=false`)
@@ -272,4 +326,3 @@ fastboot flash boot boot_ksu.img
   `fs/nomount/*`、`fs/{Kconfig,Makefile}`、`lib/lz4k/*`、`include/linux/lz4k.h`、`lib/{Kconfig,Makefile}`、`arch/arm64/configs/vendor/ext_config/moto-lahaina-xpeng.config`。
 - 文档:`docs/FEATURE_PORTS.md`、`docs/BUILD_LOG.md`(本节)、`docs/edge-s30.config`、`docs/SHA256SUMS.txt`、`docs/xpeng_build6_features.log.xz`。
 - 构建仓:`scripts/ci/build_resukisu_boot.sh` 新增 `INCREMENTAL` / `CONFIG_ONLY` 开关。
-
