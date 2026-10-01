@@ -41,8 +41,9 @@ void brutal_update_rate(struct sock *sk)
     u32 ack_rate; // Scaled by 100 (100=1.00) as kernel doesn't support float
     u64 rate, bdp, cwnd;
     u32 cwnd_gain;
+    int i;
 
-    for (int i = 0; i < PKT_INFO_SLOTS; i++)
+    for (i = 0; i < PKT_INFO_SLOTS; i++)
     {
         if (brutal->slots[i].sec >= min_sec)
         {

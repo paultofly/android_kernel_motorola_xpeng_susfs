@@ -316,7 +316,7 @@ break_literal:
                 int index = op - out;
                 int bits = 32 - __builtin_clz(index);
                 offset = (bits_buffer32 >> 1) & ( (1 << bits) - 1);
-                bits_buffer32 = bits_buffer32 >> bits + 1;
+                bits_buffer32 = bits_buffer32 >> (bits + 1);
                 remaining_bits -= bits + 1;
             }
             previous_off = offset;
