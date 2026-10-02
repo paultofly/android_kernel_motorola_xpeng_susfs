@@ -32,18 +32,53 @@
 
 ### 构建
 
+**方式一：GitHub Actions 模块化构建（推荐）**
+
+仓库内置可配置工作流 [`.github/workflows/build-modular.yml`](.github/workflows/build-modular.yml)：
+在 GitHub 网页 **Actions → 模块化构建 xpeng 5.4.302 ReSukiSU (Edge S30) → Run workflow**，
+勾选需要的模块即可（可任意组合）：
+
+| 输入 | 默认 | 说明 |
+|------|------|------|
+| `build_round` | 自动 | 编译轮次 N。**留空 = 自动从 GitHub 获取**：扫描已有 `-r<N>` 标签取最大值 +1（如已有 r8 → 本次 r9）；也可手动填数字覆盖 |
+| `enable_susfs` | ✅ | SUSFS v2.3（路径/挂载/KSTAT 隐藏、uname/cmdline 欺骗、open 重定向） |
+| `enable_rekernel` | ✅ | Re:Kernel（冻结 App 的 Binder/Signal 感知） |
+| `enable_droidspaces` | ✅ | DroidSpaces 容器（USER_NS / IPC_NS / PID_NS 等） |
+| `enable_nomount` | ✅ | NoMount（对 App 隐藏挂载） |
+| `enable_bbrv3` | ✅ | BBRv3 + TCP Brutal（默认拥塞控制 bbr） |
+| `enable_lz4k` | ✅ | LZ4K 压缩算法 |
+| `build_wlan` | ❌ | 编译 WiFi 模块（qca_cld3）。**不推荐**：通用预编译模块即可 |
+| `update_resukisu` | ❌ | 更新 KernelSU 到最新 main（会破坏 r8 验证过的组合，慎用） |
+
+产物命名规则（`<模块组合>` 按实际勾选拼接，顺序 rekernel→droidspaces→nomount→lz4k→bbrv3→susfs；全不选则为 `base`）：
+
+- `boot_resukisu_<模块组合>_r<N>.img` — boot 镜像
+- `AK3_Xpeng_<模块组合>_r<N>.zip` — AnyKernel3 刷机包
+- `Image`、`SHA256SUMS_r<N>.txt`
+
+每次运行**新建 Release + 新 tag**（`resukisu-<模块组合>-r<N>`），发布页面自动列出**支持/不支持**的模块表。
+若算出的 tag 已存在会**拒绝构建**（绝不覆盖已发布版本）。轮次全局递增，与历史 `susfs2.3-*-r8` 等标签共用计数器。
+
+> ⚙️ 模块开关实现：[`.ci/apply_module_config.sh`](.ci/apply_module_config.sh) 按选择改写
+> `arch/arm64/configs/vendor/ext_config/moto-lahaina-xpeng.config` 并提交到 HEAD
+> （保证 vermagic 仍为 `5.4.302-moto`，vendor 模块兼容）。
+> 注意：SUSFS 是 KernelSU hook 方式三选一之一，禁用时会自动改用 Manual Hook。
+
+**方式二：本地构建（开发用）**
+
 ```bash
-git clone https://github.com/paultofly/android_kernel_motorola_xpeng_susfs.git
-cd android_kernel_motorola_xpeng_susfs
+# 依赖：bison flex bc libssl-dev libelf-dev cpio python3 git
+git clone https://github.com/LuoJuly/android_kernel_motorola_xpeng_build.git build
+cd build
 
-# 安装依赖（Ubuntu 22.04+）
-sudo apt-get install bison flex bc libssl-dev libelf-dev cpio python3 git
+# 可选：先注入模块选择（默认全开）
+KERNEL_SRC=/path/to/kernel bash /path/to/kernel/.ci/apply_module_config.sh
 
-# 构建（自动下载工具链，产出 boot_ksu.img）
-bash .ci/build.sh
+VARIANT=edge-s30 KERNEL_SRC=/path/to/kernel BUILD_WLAN=false \
+  UPDATE_RESUKISU=false bash scripts/ci/build_resukisu_boot.sh
 ```
 
-产物：`.ci-work/release/boot_ksu.img`（可刷入 boot 分区）。
+产物：`build/.ci-work/edge-s30/release/boot_ksu.img`。
 
 ### 刷入
 
@@ -111,15 +146,51 @@ Kernel source for **Motorola Edge S30 (xpeng)** — Snapdragon 888+, 5.4 non-GKI
 
 ### Build
 
-```bash
-git clone https://github.com/paultofly/android_kernel_motorola_xpeng_susfs.git
-cd android_kernel_motorola_xpeng_susfs
+**Option 1: GitHub Actions modular build (recommended)**
 
-sudo apt-get install bison flex bc libssl-dev libelf-dev cpio python3 git
-bash .ci/build.sh
+The repo ships a configurable workflow [`.github/workflows/build-modular.yml`](.github/workflows/build-modular.yml).
+On GitHub: **Actions → 模块化构建 xpeng 5.4.302 ReSukiSU (Edge S30) → Run workflow**, then tick the modules you want (any combination):
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `build_round` | auto | Build round N. **Leave empty = auto from GitHub**: scans existing `-r<N>` tags and takes max + 1 (e.g. r8 exists → this run is r9); a number overrides it |
+| `enable_susfs` | ✅ | SUSFS v2.3 (path/mount/kstat hiding, uname/cmdline spoof, open redirect) |
+| `enable_rekernel` | ✅ | Re:Kernel (binder/signal awareness for frozen apps) |
+| `enable_droidspaces` | ✅ | DroidSpaces containers (USER_NS / IPC_NS / PID_NS …) |
+| `enable_nomount` | ✅ | NoMount (hide mounts from apps) |
+| `enable_bbrv3` | ✅ | BBRv3 + TCP Brutal (default congestion control `bbr`) |
+| `enable_lz4k` | ✅ | LZ4K compression |
+| `build_wlan` | ❌ | Build WiFi modules (qca_cld3). **Not recommended** — the generic prebuilt works |
+| `update_resukisu` | ❌ | Update KernelSU to latest main (breaks the r8-verified set; use with care) |
+
+Artifact naming (`<modules>` reflects what was selected, order rekernel→droidspaces→nomount→lz4k→bbrv3→susfs; `base` if none):
+
+- `boot_resukisu_<modules>_r<N>.img` — boot image
+- `AK3_Xpeng_<modules>_r<N>.zip` — AnyKernel3 flashable zip
+- `Image`, `SHA256SUMS_r<N>.txt`
+
+Each run creates a **new Release + new tag** (`resukisu-<modules>-r<N>`); the release page lists which modules are supported/unsupported.
+If the computed tag already exists the build is **rejected** (published releases are never overwritten). The counter is global and continuous with legacy tags like `susfs2.3-*-r8`.
+
+> ⚙️ How it works: [`.ci/apply_module_config.sh`](.ci/apply_module_config.sh) rewrites
+> `arch/arm64/configs/vendor/ext_config/moto-lahaina-xpeng.config` from the selected modules and commits it to HEAD
+> (keeps vermagic `5.4.302-moto` so vendor modules stay compatible).
+> Note: SUSFS is one of the three KernelSU hook modes; disabling it switches to Manual Hook automatically.
+
+**Option 2: local build (development)**
+
+```bash
+git clone https://github.com/LuoJuly/android_kernel_motorola_xpeng_build.git build
+cd build
+
+# optional: inject module selection (all enabled by default)
+KERNEL_SRC=/path/to/kernel bash /path/to/kernel/.ci/apply_module_config.sh
+
+VARIANT=edge-s30 KERNEL_SRC=/path/to/kernel BUILD_WLAN=false \
+  UPDATE_RESUKISU=false bash scripts/ci/build_resukisu_boot.sh
 ```
 
-Output: `.ci-work/release/boot_ksu.img`
+Output: `build/.ci-work/edge-s30/release/boot_ksu.img`.
 
 ### Flash
 
