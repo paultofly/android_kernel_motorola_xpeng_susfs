@@ -1,5 +1,11 @@
-obj-m += rmnet_core.o
-obj-m += rmnet_ctl.o
+# 2026-10-02 移动数据修复: obj-m -> obj-y 内建
+# 根因: /vendor 里的 rmnet_core.ko (为 stock 5.4.210 编译) 在我们内核上
+# insmod 报 "Unknown symbol rtnl_link_register (err -22)", 尽管 vendor 模块
+# __versions 段里期望的 CRC (0xddf5d971) 与我们 Module.symvers 完全一致。
+# rmnet_ipa0 存在(IPA3 内建)但 QMAP 数据面不工作 -> 有信号无数据(RX/TX=0)。
+# 修复: 将树内 techpack/datarmnet 编为内建, 彻底绕开 vendor 模块加载。
+obj-y += rmnet_core.o
+obj-y += rmnet_ctl.o
 rmnet_core-y := rmnet_config.o rmnet_handlers.o rmnet_descriptor.o \
 	rmnet_genl.o rmnet_map_command.o rmnet_map_data.o rmnet_vnd.o\
 	qmi_rmnet.o wda_qmi.o dfc_qmi.o dfc_qmap.o
