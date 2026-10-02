@@ -665,15 +665,6 @@ config TCP_CONG_BBR
 	bufferbloat, policers, or AQM schemes that do not provide a delay
 	signal. It requires the fq ("Fair Queue") pacing packet scheduler.
 
-config TCP_CONG_BRUTAL
-	tristate "TCP Brutal"
-	default m
-	help
-	  TCP Brutal is a rate-based congestion control algorithm that paces
-	  packets to a configured maximum sending rate while keeping latency
-	  low. It is the congestion control used by Hysteria/brutal tunnels.
-	  Backported from https://github.com/apernet/tcp-brutal to Linux 5.4.
-
 choice
 	prompt "Default TCP congestion control"
 	default DEFAULT_CUBIC
@@ -710,9 +701,6 @@ choice
 
 	config DEFAULT_BBR
 		bool "BBR" if TCP_CONG_BBR=y
-
-	config DEFAULT_BRUTAL
-		bool "Brutal" if TCP_CONG_BRUTAL=y
 
 	config DEFAULT_RENO
 		bool "Reno"
