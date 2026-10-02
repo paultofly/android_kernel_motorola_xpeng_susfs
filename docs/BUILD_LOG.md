@@ -407,3 +407,49 @@ techpack 的 `techpack/datarmnet/core/Kbuild` 硬编码 `obj-m`(不读 CONFIG_RM
 
 ✅ **刷入后移动数据已恢复** —— 开机正常, 有信号, 数据开关打开后可正常上网。
 根因(vendor rmnet_core.ko 符号校验失败)与修复(树内 rmnet 内建)得到实测确认。
+## 十二、第五轮: 恢复 BBRv3 + TCP Brutal (2026-10-02, incr 增量编译)
+
+### 12.1 背景
+
+移动数据根因已确认为 vendor rmnet_core.ko 加载失败(§11), 与 TCP 特性无关。
+rmnet 修复版实测正常后, 按用户要求恢复 BBRv3 + TCP Brutal 并设 BBR 为默认。
+
+### 12.2 恢复内容
+
+- 源码: `tcp_bbr.c`/`tcp_rate.c`/`include/net/tcp.h` (BBRv3 backport, 取自 c1024a5d2b71)
+- 源码: `brutal.{h,cc,sockopt,rules}` (TCP Brutal, 取自 af3d05205bde 含 warning 修复)
+- Kconfig/Makefile 条目一并恢复
+- ext_config: `TCP_CONG_BBR=y` `TCP_CONG_BRUTAL=y` `DEFAULT_BBR=y` `DEFAULT_TCP_CONG="bbr"`,
+  另编入 cubic/vegas/nv/westwood/htcp 及 `NET_SCH_FQ=y`(fq 不作默认 qdisc)
+
+### 12.3 构建(incr, BUILD_WLAN=false)
+
+- HEAD: `74c83e9f2485` (tag `susfs2.3-droidspace-rekernel`)
+- 时间: 12:11:57 → 12:19:31, 约 7 分 34 秒
+- 编译: `tcp_bbr.o`/`brutal_cc.o`/`brutal_sockopt.o` 无 forbidden warning
+
+### 12.4 验证
+
+| 项 | 结果 |
+|----|------|
+| `kernel.release` | ✅ `5.4.302-moto` |
+| `DEFAULT_TCP_CONG` | ✅ `"bbr"` (+ `DEFAULT_BBR=y`) |
+| BBR/Brutal 编入 | ✅ `TCP_CONG_BBR=y` `TCP_CONG_BRUTAL=y` |
+| vmlinux 符号 | ✅ `bbr_init`/`brutal_register`/`rmnet_init` |
+| rmnet 内建保留 | ✅ `rmnet_init` 在 vmlinux |
+| boot 内嵌内核 == Image | ✅ SHA-256 一致 |
+| USER_NS/NOMOUNT/LZ4K/fq | ✅ 保留 |
+
+### 12.5 产物
+
+| 文件 | SHA-256 |
+|------|---------|
+| `boot_ksu.img` (96M) | `75346dac61466c6660113a9d35cef6a55cbe1caa8e9f5e0ca4420b4ad7b5f672` |
+| `Image` (42M) | `aed924c94f80358ca526ae3ccdf9dfa224eccbfa7cf06ba920402be9a3f21b08` |
+
+### 12.6 运行时说明
+
+- BBR 为系统默认, 无需任何设置
+- 如需切回: `sysctl -w net.ipv4.tcp_congestion_control=cubic`
+- fq 需要时: `sysctl -w net.core.default_qdisc=fq`
+- Brutal 单连接用法见 FEATURE_PORTS.md(setsockopt TCP_CONGESTION="brutal" + TCP_BRUTAL_RATE)
