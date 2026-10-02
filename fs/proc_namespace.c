@@ -14,7 +14,7 @@
 #include <linux/sched/task.h>
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 #include <linux/susfs_def.h>
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#endif
 
 #include "proc/internal.h" /* only for get_proc_task() in ->open() */
 
@@ -22,9 +22,9 @@
 #include "internal.h"
 
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-extern struct static_key_false susfs_is_hide_sus_mnts_for_non_su_procs_enabled;
 extern bool susfs_is_current_ksu_domain(void);
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+extern struct static_key_false susfs_is_hide_sus_mnts_for_non_su_procs_enabled;
+#endif
 
 static __poll_t mounts_poll(struct file *file, poll_table *wait)
 {
@@ -110,6 +110,8 @@ static int show_vfsmnt(struct seq_file *m, struct vfsmount *mnt)
 	struct super_block *sb = mnt_path.dentry->d_sb;
 	int err;
 
+
+
 	if (sb->s_op->show_devname) {
 		err = sb->s_op->show_devname(m, mnt_path.dentry);
 		if (err)
@@ -145,6 +147,8 @@ static int show_mountinfo(struct seq_file *m, struct vfsmount *mnt)
 	struct super_block *sb = mnt->mnt_sb;
 	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
 	int err;
+
+
 
 	seq_printf(m, "%i %i %u:%u ", r->mnt_id, r->mnt_parent->mnt_id,
 		   MAJOR(sb->s_dev), MINOR(sb->s_dev));
@@ -209,6 +213,8 @@ static int show_vfsstat(struct seq_file *m, struct vfsmount *mnt)
 	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
 	struct super_block *sb = mnt_path.dentry->d_sb;
 	int err;
+
+
 
 	/* device */
 	if (sb->s_op->show_devname) {
@@ -278,7 +284,9 @@ static int susfs_show_vfsmnt(struct seq_file *m, struct vfsmount *mnt)
 	if (err)
 		goto out;
 	show_mnt_opts(m, mnt);
-	if (sb->s_op->show_options)
+	if (sb->s_op->show_options2)
+			err = sb->s_op->show_options2(mnt, m, mnt_path.dentry);
+	else if (sb->s_op->show_options)
 		err = sb->s_op->show_options(m, mnt_path.dentry);
 	seq_puts(m, " 0 0\n");
 out:
@@ -343,7 +351,9 @@ static int susfs_show_mountinfo(struct seq_file *m, struct vfsmount *mnt)
 	err = show_sb_opts(m, sb);
 	if (err)
 		goto out;
-	if (sb->s_op->show_options)
+	if (sb->s_op->show_options2) {
+		err = sb->s_op->show_options2(mnt, m, mnt->mnt_root);
+	} else if (sb->s_op->show_options)
 		err = sb->s_op->show_options(m, mnt->mnt_root);
 	seq_putc(m, '\n');
 out:

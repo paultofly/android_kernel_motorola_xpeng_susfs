@@ -1,6 +1,8 @@
 package com.resukisu.resukisu.ui.screen
 
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Environment
 import android.os.Parcelable
 import androidx.activity.ComponentActivity
@@ -69,20 +71,13 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.resukisu.resukisu.Natives
 import com.resukisu.resukisu.R
-import com.resukisu.resukisu.domain.model.FlashOperation
-import com.resukisu.resukisu.domain.model.FlashOperationUpdate
-import com.resukisu.resukisu.domain.model.LkmSelection
-import com.resukisu.resukisu.domain.model.MetaModuleStatus
-import com.resukisu.resukisu.domain.usecase.CheckFlashModuleMountUseCase
-import com.resukisu.resukisu.domain.usecase.ExecuteFlashOperationUseCase
-import com.resukisu.resukisu.domain.usecase.ExtractModuleNameUseCase
-import com.resukisu.resukisu.domain.usecase.IsLateLoadModeUseCase
-import com.resukisu.resukisu.domain.usecase.IsModuleUriAccessibleUseCase
 import com.resukisu.resukisu.ui.component.KeyEventBlocker
 import com.resukisu.resukisu.ui.component.SwipeableSnackbarHost
 import com.resukisu.resukisu.ui.component.rememberCustomDialog
@@ -90,40 +85,91 @@ import com.resukisu.resukisu.ui.component.settings.AppBackButton
 import com.resukisu.resukisu.ui.navigation.LocalNavigator
 import com.resukisu.resukisu.ui.navigation.Route
 import com.resukisu.resukisu.ui.theme.CardConfig
-import com.resukisu.resukisu.ui.theme.MonospaceFontFamily
 import com.resukisu.resukisu.ui.theme.ThemeConfig
 import com.resukisu.resukisu.ui.theme.blurEffect
 import com.resukisu.resukisu.ui.theme.blurSource
-import com.resukisu.resukisu.ui.theme.renderBackgroundBlur
+import com.resukisu.resukisu.ui.util.LkmSelection
 import com.resukisu.resukisu.ui.util.LocalSnackbarHost
-import com.resukisu.resukisu.ui.util.adaptiveScaffoldWindowInsets
-import com.resukisu.resukisu.ui.util.showReplacingSnackbar
-import com.resukisu.resukisu.ui.viewmodel.FlashUiAction
-import com.resukisu.resukisu.ui.viewmodel.FlashViewModel
-import com.resukisu.resukisu.ui.viewmodel.FlashingStatus
-import com.resukisu.resukisu.ui.viewmodel.ModuleInstallStatus
-import com.resukisu.resukisu.ui.viewmodel.ModuleUiAction
+import com.resukisu.resukisu.ui.util.flashModule
+import com.resukisu.resukisu.ui.util.hasMetaModule
+import com.resukisu.resukisu.ui.util.installBoot
+import com.resukisu.resukisu.ui.util.module.ModuleUtils
+import com.resukisu.resukisu.ui.util.reboot
+import com.resukisu.resukisu.ui.util.restoreBoot
+import com.resukisu.resukisu.ui.util.uninstallPermanently
 import com.resukisu.resukisu.ui.viewmodel.ModuleViewModel
+import com.topjohnwu.superuser.io.SuFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.parcelize.Parcelize
-import org.koin.compose.koinInject
-import org.koin.compose.viewmodel.koinViewModel
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.time.Duration.Companion.milliseconds
+
+/**
+ * @author ShirkNeko
+ * @date 2025/5/31.
+ */
+enum class FlashingStatus {
+    FLASHING,
+    SUCCESS,
+    FAILED
+}
+
+private var currentFlashingStatus = mutableStateOf(FlashingStatus.FLASHING)
+
+// 添加模块安装状态跟踪
+data class ModuleInstallStatus(
+    val totalModules: Int = 0,
+    val currentModule: Int = 0,
+    val currentModuleName: String = "",
+    val failedModules: MutableList<String> = mutableListOf(),
+    val verifiedModules: MutableList<String> = mutableListOf() // 添加已验证模块列表
+)
+
+private var moduleInstallStatus = mutableStateOf(ModuleInstallStatus())
+
+fun setFlashingStatus(status: FlashingStatus) {
+    currentFlashingStatus.value = status
+}
+
+fun updateModuleInstallStatus(
+    totalModules: Int? = null,
+    currentModule: Int? = null,
+    currentModuleName: String? = null,
+    failedModule: String? = null,
+    verifiedModule: String? = null
+) {
+    val current = moduleInstallStatus.value
+    moduleInstallStatus.value = current.copy(
+        totalModules = totalModules ?: current.totalModules,
+        currentModule = currentModule ?: current.currentModule,
+        currentModuleName = currentModuleName ?: current.currentModuleName
+    )
+
+    if (failedModule != null) {
+        val updatedFailedModules = current.failedModules.toMutableList()
+        updatedFailedModules.add(failedModule)
+        moduleInstallStatus.value = moduleInstallStatus.value.copy(
+            failedModules = updatedFailedModules
+        )
+    }
+
+    if (verifiedModule != null) {
+        val updatedVerifiedModules = current.verifiedModules.toMutableList()
+        updatedVerifiedModules.add(verifiedModule)
+        moduleInstallStatus.value = moduleInstallStatus.value.copy(
+            verifiedModules = updatedVerifiedModules
+        )
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FlashScreen(flashIt: FlashIt) {
-    val extractModuleName = koinInject<ExtractModuleNameUseCase>()
-    val isModuleUriAccessible = koinInject<IsModuleUriAccessibleUseCase>()
-    val checkFlashModuleMount = koinInject<CheckFlashModuleMountUseCase>()
-    val executeFlashOperation = koinInject<ExecuteFlashOperationUseCase>()
     val context = LocalContext.current
 
     // 是否通过从外部启动的模块安装
@@ -161,12 +207,7 @@ fun FlashScreen(flashIt: FlashIt) {
     val scrollState = rememberScrollState()
     val scrollBehavior =
         TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
-    val viewModel: ModuleViewModel = koinViewModel()
-    val flashViewModel: FlashViewModel = koinViewModel()
-    val moduleUiState by viewModel.state.collectAsStateWithLifecycle()
-    val flashUiState by flashViewModel.state.collectAsStateWithLifecycle()
-    val hasMetaModule = moduleUiState.metaModuleStatus == MetaModuleStatus.ACTIVE
-    val isLateLoadMode = koinInject<IsLateLoadModeUseCase>()
+    val viewModel: ModuleViewModel = viewModel()
 
     val errorCodeString = stringResource(R.string.error_code)
     val checkLogString = stringResource(R.string.check_log)
@@ -207,7 +248,7 @@ fun FlashScreen(flashIt: FlashIt) {
     }
 
     // 当前模块安装状态
-    val currentStatus = flashUiState.moduleInstallStatus
+    val currentStatus = moduleInstallStatus.value
 
     LaunchedEffect(Unit) {
         scrollBehavior.state.heightOffset = scrollBehavior.state.heightOffsetLimit
@@ -218,7 +259,10 @@ fun FlashScreen(flashIt: FlashIt) {
         when (flashIt) {
             is FlashIt.FlashModules -> {
                 if (flashIt.currentIndex == 0) {
-                    flashViewModel.dispatch(FlashUiAction.ResetModules(flashIt.uris.size))
+                    moduleInstallStatus.value = ModuleInstallStatus(
+                        totalModules = flashIt.uris.size,
+                        currentModule = 1
+                    )
                     shouldWarningUserMetaModule = false
                     hasFlashCompleted = false
                     hasExecuted = false
@@ -247,7 +291,7 @@ fun FlashScreen(flashIt: FlashIt) {
         hasUpdateExecuted = true
 
         withContext(Dispatchers.IO) {
-            flashViewModel.dispatch(FlashUiAction.SetStatus(FlashingStatus.FLASHING))
+            setFlashingStatus(FlashingStatus.FLASHING)
 
             try {
                 logContent.append(text).append("\n")
@@ -255,14 +299,14 @@ fun FlashScreen(flashIt: FlashIt) {
                 logContent.append(text).append("\n")
             }
 
-            flashModuleUpdate(executeFlashOperation, flashIt.uri, onFinish = { showReboot, code ->
+            flashModuleUpdate(flashIt.uri, onFinish = { showReboot, code ->
                 if (code != 0) {
                     text += "$errorCodeString $code.\n$checkLogString\n"
-                    flashViewModel.dispatch(FlashUiAction.SetStatus(FlashingStatus.FAILED))
+                    setFlashingStatus(FlashingStatus.FAILED)
                 } else {
-                    flashViewModel.dispatch(FlashUiAction.SetStatus(FlashingStatus.SUCCESS))
+                    setFlashingStatus(FlashingStatus.SUCCESS)
 
-                    viewModel.dispatch(ModuleUiAction.MarkNeedRefresh)
+                    viewModel.markNeedRefresh()
                 }
                 if (showReboot) {
                     text += "\n\n\n"
@@ -275,10 +319,12 @@ fun FlashScreen(flashIt: FlashIt) {
                 }
                 hasUpdateCompleted = true
 
-                if (!hasMetaModule && code == 0) {
+                if (!hasMetaModule() && code == 0) {
                     // 如果没安装 MetaModule，且此模块需要挂载，并且当前模块安装成功，警告用户
                     scope.launch {
-                        if (!checkFlashModuleMount(flashIt.uri)) return@launch
+                        val mountOldDirectory = SuFile.open("/data/adb/modules/${getModuleIdFromUri(context,flashIt.uri)}/system")
+                        val mountNewDirectory = SuFile.open("/data/adb/modules_update/${getModuleIdFromUri(context,flashIt.uri)}/system")
+                        if (!(mountNewDirectory.isDirectory) && !(mountOldDirectory.isDirectory)) return@launch
                         shouldWarningUserMetaModule = true
 
                         alertDialog.show()
@@ -301,7 +347,7 @@ fun FlashScreen(flashIt: FlashIt) {
 
     var flashEnabled by rememberSaveable { mutableStateOf(false) }
 
-    val needJailbreakWarning = flashIt is FlashIt.FlashBoot && isLateLoadMode()
+    val needJailbreakWarning = flashIt is FlashIt.FlashBoot && Natives.isLateLoadMode
 
     if (needJailbreakWarning && !flashEnabled) {
         JailbreakFlashWarningDialog(
@@ -320,23 +366,16 @@ fun FlashScreen(flashIt: FlashIt) {
         if (needJailbreakWarning && !flashEnabled) return@LaunchedEffect
 
         hasExecuted = true
-        var currentModuleName = ""
 
         withContext(Dispatchers.IO) {
-            flashViewModel.dispatch(FlashUiAction.SetStatus(FlashingStatus.FLASHING))
+            setFlashingStatus(FlashingStatus.FLASHING)
 
             if (flashIt is FlashIt.FlashModules) {
                 try {
                     val currentUri = flashIt.uris[flashIt.currentIndex]
-                    val moduleName = getModuleNameFromUri(
-                        context,
-                        currentUri,
-                        extractModuleName,
-                        isModuleUriAccessible,
-                    )
-                    currentModuleName = moduleName
-                    flashViewModel.dispatch(
-                        FlashUiAction.UpdateModule(currentModuleName = moduleName)
+                    val moduleName = getModuleNameFromUri(context, currentUri)
+                    updateModuleInstallStatus(
+                        currentModuleName = moduleName
                     )
                     text = installingModuleString.format(flashIt.currentIndex + 1, flashIt.uris.size, moduleName)
                     logContent.append(text).append("\n")
@@ -346,22 +385,20 @@ fun FlashScreen(flashIt: FlashIt) {
                 }
             }
 
-            flashIt(executeFlashOperation, flashIt, onFinish = { showReboot, code ->
+            flashIt(flashIt, onFinish = { showReboot, code ->
                 if (code != 0) {
                     text += "$errorCodeString $code.\n$checkLogString\n"
-                    flashViewModel.dispatch(FlashUiAction.SetStatus(FlashingStatus.FAILED))
+                    setFlashingStatus(FlashingStatus.FAILED)
 
                     if (flashIt is FlashIt.FlashModules) {
-                        flashViewModel.dispatch(
-                            FlashUiAction.UpdateModule(
-                                failedModule = currentModuleName
-                            )
+                        updateModuleInstallStatus(
+                            failedModule = moduleInstallStatus.value.currentModuleName
                         )
                     }
                 } else {
-                    flashViewModel.dispatch(FlashUiAction.SetStatus(FlashingStatus.SUCCESS))
+                    setFlashingStatus(FlashingStatus.SUCCESS)
 
-                    viewModel.dispatch(ModuleUiAction.MarkNeedRefresh)
+                    viewModel.markNeedRefresh()
                 }
                 if (showReboot) {
                     text += "\n\n\n"
@@ -369,20 +406,34 @@ fun FlashScreen(flashIt: FlashIt) {
                 }
 
                 hasFlashCompleted = true
-                if (!hasMetaModule && code == 0) {
+                if (!hasMetaModule() && code == 0) {
                     // 没有 MetaModule，且安装成功，检查此模块是否有自动挂载
                     scope.launch {
-                        val mountUri = when (flashIt) {
-                            is FlashIt.FlashModules -> flashIt.uris.getOrNull(flashIt.currentIndex)
-                            is FlashIt.FlashModule -> flashIt.uri
-                            is FlashIt.FlashModuleUpdate -> flashIt.uri
-                            else -> null
-                        } ?: return@launch
-                        if (!checkFlashModuleMount(mountUri)) return@launch
+                        var mountOldDirectory : File
+                        var mountNewDirectory : File
+                        when (flashIt) {
+                            is FlashIt.FlashModules -> {
+                                mountOldDirectory = SuFile.open("/data/adb/modules/${getModuleIdFromUri(context,flashIt.uris[flashIt.currentIndex])}/system")
+                                mountNewDirectory = SuFile.open("/data/adb/modules_update/${getModuleIdFromUri(context,flashIt.uris[flashIt.currentIndex])}/system")
+                            }
+
+                            is FlashIt.FlashModule -> {
+                                mountOldDirectory = SuFile.open("/data/adb/modules/${getModuleIdFromUri(context,flashIt.uri)}/system")
+                                mountNewDirectory = SuFile.open("/data/adb/modules_update/${getModuleIdFromUri(context,flashIt.uri)}/system")
+                            }
+
+                            is FlashIt.FlashModuleUpdate -> {
+                                mountOldDirectory = SuFile.open("/data/adb/modules/${getModuleIdFromUri(context,flashIt.uri)}/system")
+                                mountNewDirectory = SuFile.open("/data/adb/modules_update/${getModuleIdFromUri(context,flashIt.uri)}/system")
+                            }
+
+                            else -> return@launch
+                        }
+                        if (!mountNewDirectory.isDirectory && !mountOldDirectory.isDirectory) return@launch
                         shouldWarningUserMetaModule = true
 
-                        if (flashIt !is FlashIt.FlashModules || flashIt.currentIndex >= flashIt.uris.size - 1) {
-                            // 如果当前不是多模块刷写或是最后一个需要自动刷写的模块，而且有模块需要挂载，警告用户
+                        if (!hasMetaModule() && (flashIt !is FlashIt.FlashModules || flashIt.currentIndex >= flashIt.uris.size - 1)) {
+                            // 如果没有 MetaModule，且当前不是多模块刷写或是最后一个需要自动刷写的模块，而且有模块需要挂载，警告用户
                             alertDialog.show()
                         }
                     }
@@ -393,10 +444,8 @@ fun FlashScreen(flashIt: FlashIt) {
                         currentIndex = flashIt.currentIndex + 1
                     )
                     scope.launch {
-                        delay(500.milliseconds)
-                        navigator.replace(
-                            Route.Flash.modules(nextFlashIt.uris, nextFlashIt.currentIndex)
-                        )
+                        delay(500)
+                        navigator.replace(Route.Flash(nextFlashIt))
                     }
                 }
             }, onStdout = {
@@ -415,8 +464,8 @@ fun FlashScreen(flashIt: FlashIt) {
 
     val onBack: () -> Unit = {
         val canGoBack = when (flashIt) {
-            is FlashIt.FlashModuleUpdate -> flashUiState.flashingStatus != FlashingStatus.FLASHING
-            else -> flashUiState.flashingStatus != FlashingStatus.FLASHING
+            is FlashIt.FlashModuleUpdate -> currentFlashingStatus.value != FlashingStatus.FLASHING
+            else -> currentFlashingStatus.value != FlashingStatus.FLASHING
         }
 
         if (canGoBack) {
@@ -424,12 +473,12 @@ fun FlashScreen(flashIt: FlashIt) {
                 (context as? ComponentActivity)?.finish()
             } else {
                 if (flashIt is FlashIt.FlashModules || flashIt is FlashIt.FlashModuleUpdate) {
-                    viewModel.dispatch(ModuleUiAction.MarkNeedRefresh)
-                    viewModel.dispatch(ModuleUiAction.Refresh())
+                    viewModel.markNeedRefresh()
+                    viewModel.fetchModuleList()
                     navigator.replaceAll(listOf(Route.Module))
                 } else {
-                    viewModel.dispatch(ModuleUiAction.MarkNeedRefresh)
-                    viewModel.dispatch(ModuleUiAction.Refresh())
+                    viewModel.markNeedRefresh()
+                    viewModel.fetchModuleList()
                     navigator.pop()
                 }
             }
@@ -441,10 +490,9 @@ fun FlashScreen(flashIt: FlashIt) {
     }
 
     Scaffold(
-        contentWindowInsets = adaptiveScaffoldWindowInsets(),
         topBar = {
             TopBar(
-                flashUiState.flashingStatus,
+                currentFlashingStatus.value,
                 currentStatus,
                 onBack = onBack,
                 onSave = {
@@ -456,7 +504,7 @@ fun FlashScreen(flashIt: FlashIt) {
                             "KernelSU_install_log_${date}.log"
                         )
                         file.writeText(logContent.toString())
-                        snackBarHost.showReplacingSnackbar(logSavedString.format(file.absolutePath))
+                        snackBarHost.showSnackbar(logSavedString.format(file.absolutePath))
                     }
                 },
                 scrollBehavior = scrollBehavior
@@ -466,11 +514,11 @@ fun FlashScreen(flashIt: FlashIt) {
             if (showFloatAction) {
                 ExtendedFloatingActionButton(
                     onClick = {
-                        flashViewModel.dispatch(
-                            FlashUiAction.Reboot(
-                                allowSoftReboot = flashIt is FlashIt.FlashModule || flashIt is FlashIt.FlashModules || flashIt is FlashIt.FlashModuleUpdate
-                            )
-                        )
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                reboot()
+                            }
+                        }
                     },
                     icon = {
                         Icon(
@@ -498,17 +546,16 @@ fun FlashScreen(flashIt: FlashIt) {
         Column(
             modifier = Modifier
                 .fillMaxSize(1f)
+                .padding(innerPadding)
                 .nestedScroll(scrollBehavior.nestedScrollConnection)
                 .blurSource(),
         ) {
-            Spacer(modifier = Modifier.height(innerPadding.calculateTopPadding()))
-
             if (flashIt is FlashIt.FlashModules) {
                 ModuleInstallProgressBar(
                     currentIndex = flashIt.currentIndex + 1,
                     totalCount = flashIt.uris.size,
                     currentModuleName = currentStatus.currentModuleName,
-                    status = flashUiState.flashingStatus,
+                    status = currentFlashingStatus.value,
                     failedModules = currentStatus.failedModules
                 )
 
@@ -528,11 +575,10 @@ fun FlashScreen(flashIt: FlashIt) {
                     modifier = Modifier.padding(16.dp),
                     text = text,
                     style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = MonospaceFontFamily(),
+                    fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
-            Spacer(modifier = Modifier.height(innerPadding.calculateBottomPadding()))
         }
     }
 }
@@ -548,7 +594,7 @@ fun JailbreakFlashWarningDialog(
 
     LaunchedEffect(Unit) {
         while (countdown > 0) {
-            delay(1000.milliseconds)
+            delay(1000)
             countdown--
         }
     }
@@ -593,8 +639,6 @@ fun ModuleInstallProgressBar(
     status: FlashingStatus,
     failedModules: List<String>
 ) {
-    val themeConfig: ThemeConfig = koinInject()
-    val cardConfig: CardConfig = koinInject()
     val progressColor = when(status) {
         FlashingStatus.FLASHING -> MaterialTheme.colorScheme.primary
         FlashingStatus.SUCCESS -> MaterialTheme.colorScheme.tertiary
@@ -609,12 +653,9 @@ fun ModuleInstallProgressBar(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp)
-            .renderBackgroundBlur(MaterialTheme.colorScheme.surfaceBright),
+            .padding(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (themeConfig.isEnableBlurExp) Color.Transparent else MaterialTheme.colorScheme.surfaceBright.copy(
-                alpha = cardConfig.cardAlpha
-            )
+            containerColor = MaterialTheme.colorScheme.surfaceBright
         )
     ) {
         Column(
@@ -715,8 +756,8 @@ private fun TopBar(
     onSave: () -> Unit = {},
     scrollBehavior: TopAppBarScrollBehavior
 ) {
-    val themeConfig: ThemeConfig = koinInject()
-    val cardConfig: CardConfig = koinInject()
+    MaterialTheme.colorScheme
+
     val statusColor = when(status) {
         FlashingStatus.FLASHING -> MaterialTheme.colorScheme.primary
         FlashingStatus.SUCCESS -> MaterialTheme.colorScheme.tertiary
@@ -756,15 +797,15 @@ private fun TopBar(
         },
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor =
-                if (themeConfig.isEnableBlur)
+                if (ThemeConfig.isEnableBlur)
                     Color.Transparent
                 else
-                    MaterialTheme.colorScheme.surfaceContainer.copy(cardConfig.cardAlpha),
+                    MaterialTheme.colorScheme.surfaceContainer.copy(CardConfig.cardAlpha),
             scrolledContainerColor =
-                if (themeConfig.isEnableBlur)
+                if (ThemeConfig.isEnableBlur)
                     Color.Transparent
                 else
-                    MaterialTheme.colorScheme.surfaceContainer.copy(cardConfig.cardAlpha),
+                    MaterialTheme.colorScheme.surfaceContainer.copy(CardConfig.cardAlpha),
         ),
         actions = {
             IconButton(onClick = onSave) {
@@ -779,107 +820,91 @@ private fun TopBar(
     )
 }
 
-suspend fun getModuleNameFromUri(
-    context: android.content.Context,
-    uri: String,
-    extractModuleName: ExtractModuleNameUseCase,
-    isModuleUriAccessible: IsModuleUriAccessibleUseCase,
-): String {
+suspend fun getModuleNameFromUri(context: Context, uri: Uri): String {
     return withContext(Dispatchers.IO) {
         try {
-            if (uri.isBlank()) {
+            if (uri == Uri.EMPTY) {
                 return@withContext context.getString(R.string.unknown_module)
             }
-            if (!isModuleUriAccessible(uri)) {
+            if (!ModuleUtils.isUriAccessible(context, uri)) {
                 return@withContext context.getString(R.string.unknown_module)
             }
-            extractModuleName(uri)
+            ModuleUtils.extractModuleName(context, uri)
         } catch (_: Exception) {
             context.getString(R.string.unknown_module)
         }
     }
 }
 
+suspend fun getModuleIdFromUri(context: Context, uri: Uri): String? {
+    return withContext(Dispatchers.IO) {
+        try {
+            if (uri == Uri.EMPTY) {
+                return@withContext null
+            }
+            if (!ModuleUtils.isUriAccessible(context, uri)) {
+                return@withContext null
+            }
+            ModuleUtils.extractModuleId(context, uri)
+        } catch (_: Exception) {
+            null
+        }
+    }
+}
+
 @Parcelize
 sealed class FlashIt : Parcelable {
-    data class FlashBoot(
-        val boot: String? = null,
-        val lkmUri: String? = null,
-        val kmi: String? = null,
-        val ota: Boolean,
-        val partition: String? = null,
-        val allowShell: Boolean = false,
-        val enableAdb: Boolean = false,
-        val forceBackup: Boolean = false,
-    ) : FlashIt()
-
-    data class FlashModule(val uri: String) : FlashIt()
-    data class FlashModules(val uris: List<String>, val currentIndex: Int = 0) : FlashIt()
-    data class FlashModuleUpdate(val uri: String) : FlashIt() // 模块更新
+    data class FlashBoot(val boot: Uri? = null, val lkm: LkmSelection, val ota: Boolean, val partition: String? = null) : FlashIt()
+    data class FlashModule(val uri: Uri) : FlashIt()
+    data class FlashModules(val uris: List<Uri>, val currentIndex: Int = 0) : FlashIt()
+    data class FlashModuleUpdate(val uri: Uri) : FlashIt() // 模块更新
     data object FlashRestore : FlashIt()
     data object FlashUninstall : FlashIt()
 }
 
 // 模块更新刷写
-private suspend fun flashModuleUpdate(
-    execute: ExecuteFlashOperationUseCase,
-    uri: String,
+fun flashModuleUpdate(
+    uri: Uri,
     onFinish: (Boolean, Int) -> Unit,
     onStdout: (String) -> Unit,
     onStderr: (String) -> Unit
 ) {
-    execute(FlashOperation.Module(uri)).collect { update ->
-        when (update) {
-            is FlashOperationUpdate.Output -> onStdout(update.line)
-            is FlashOperationUpdate.ErrorOutput -> onStderr(update.line)
-            is FlashOperationUpdate.Completed -> onFinish(update.showReboot, update.code)
-        }
-    }
+    flashModule(uri, onFinish, onStdout, onStderr)
 }
 
-private suspend fun flashIt(
-    execute: ExecuteFlashOperationUseCase,
+fun flashIt(
     flashIt: FlashIt,
     onFinish: (Boolean, Int) -> Unit,
     onStdout: (String) -> Unit,
     onStderr: (String) -> Unit
 ) {
-    val operation = when (flashIt) {
-        is FlashIt.FlashBoot -> FlashOperation.Boot(
-            bootUri = flashIt.boot,
-            lkm = when {
-                flashIt.lkmUri != null -> LkmSelection.LkmUri(flashIt.lkmUri)
-                flashIt.kmi != null -> LkmSelection.KmiString(flashIt.kmi)
-                else -> LkmSelection.KmiNone
-            },
-            ota = flashIt.ota,
-            partition = flashIt.partition,
-            allowShell = flashIt.allowShell,
-            enableAdb = flashIt.enableAdb,
-            forceBackup = flashIt.forceBackup,
+    when (flashIt) {
+        is FlashIt.FlashBoot -> installBoot(
+            flashIt.boot,
+            flashIt.lkm,
+            flashIt.ota,
+            flashIt.partition,
+            onFinish,
+            onStdout,
+            onStderr
         )
-
-        is FlashIt.FlashModule -> FlashOperation.Module(flashIt.uri)
+        is FlashIt.FlashModule -> flashModule(flashIt.uri, onFinish, onStdout, onStderr)
         is FlashIt.FlashModules -> {
             if (flashIt.uris.isEmpty() || flashIt.currentIndex >= flashIt.uris.size) {
                 onFinish(false, 0)
                 return
             }
+
+            val currentUri = flashIt.uris[flashIt.currentIndex]
             onStdout("\n")
-            FlashOperation.Module(flashIt.uris[flashIt.currentIndex])
-        }
 
-        is FlashIt.FlashModuleUpdate -> FlashOperation.Module(flashIt.uri)
-        FlashIt.FlashRestore -> FlashOperation.Restore
-        FlashIt.FlashUninstall -> FlashOperation.Uninstall
-    }
-
-    execute(operation).collect { update ->
-        when (update) {
-            is FlashOperationUpdate.Output -> onStdout(update.line)
-            is FlashOperationUpdate.ErrorOutput -> onStderr(update.line)
-            is FlashOperationUpdate.Completed -> onFinish(update.showReboot, update.code)
+            flashModule(currentUri, onFinish, onStdout, onStderr)
         }
+        is FlashIt.FlashModuleUpdate -> {
+            onFinish(false, 0)
+        }
+        FlashIt.FlashRestore -> restoreBoot(onFinish, onStdout, onStderr)
+        FlashIt.FlashUninstall -> uninstallPermanently(onFinish, onStdout, onStderr)
     }
 }
 

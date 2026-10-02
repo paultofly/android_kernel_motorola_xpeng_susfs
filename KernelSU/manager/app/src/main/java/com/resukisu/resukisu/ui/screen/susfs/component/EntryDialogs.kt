@@ -31,7 +31,6 @@ import com.resukisu.resukisu.ui.component.settings.SegmentedColumnScope
 import com.resukisu.resukisu.ui.component.settings.SettingsDropdownWidget
 import com.resukisu.resukisu.ui.component.settings.SettingsJumpPageWidget
 import com.resukisu.resukisu.ui.util.LocalSnackbarHost
-import com.resukisu.resukisu.ui.util.showReplacingSnackbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -152,7 +151,7 @@ fun ManualAddDialog(
 
                 val error = decodedContent.exceptionOrNull()
                 if (error != null) {
-                    snackbarHost.showReplacingSnackbar(
+                    snackbarHost.showSnackbar(
                         if (error is CharacterCodingException) fileNotTextMsg else fileReadFailedMsg
                     )
                     return@launch

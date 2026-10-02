@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import com.resukisu.resukisu.R
+import com.resukisu.resukisu.ui.component.ksuIsValid
 import com.resukisu.resukisu.ui.screen.main.HomePage
 import com.resukisu.resukisu.ui.screen.main.ModulePage
 import com.resukisu.resukisu.ui.screen.main.SettingsPage
@@ -52,8 +53,8 @@ enum class BottomBarDestination(
     );
 
     companion object {
-        fun getPages(isKsuValid: Boolean): List<BottomBarDestination> {
-            return if (isKsuValid) {
+        fun getPages(): List<BottomBarDestination> {
+            return if (ksuIsValid()) {
                 // 全功能管理器
                 BottomBarDestination.entries.toList()
             } else {

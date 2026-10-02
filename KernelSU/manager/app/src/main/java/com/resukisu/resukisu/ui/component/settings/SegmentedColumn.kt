@@ -41,8 +41,6 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
 import androidx.compose.ui.zIndex
-import com.resukisu.resukisu.ui.theme.ThemeConfig
-import org.koin.compose.koinInject
 import kotlin.math.roundToInt
 
 private const val PADDING_HORIZONTAL = 16
@@ -73,6 +71,8 @@ data class SegmentedItemData(
 @SegmentedColumnDsl
 class SegmentedColumnScope {
     val items = mutableListOf<SegmentedItemData>()
+
+    // 内部维护的嵌套上下文状态：用于无感向后代传递“顶部强制扁平”和“全局可见性遮罩”
     private var isInsideExpandableBody: Boolean = false
     private var parentVisibilityMask: Boolean = true
 
@@ -88,7 +88,6 @@ class SegmentedColumnScope {
         content: @Composable (Shape) -> Unit
     ) {
         val resolvedForceFlatTop = forceFlatTop || isInsideExpandableBody
-        val resolvedForceFlatBottom = forceFlatBottom || isInsideExpandableBody
         val resolvedVisible = visible && parentVisibilityMask
 
         items.add(
@@ -97,7 +96,7 @@ class SegmentedColumnScope {
                 visible = resolvedVisible,
                 customTopPadding = topPadding,
                 forceFlatTop = resolvedForceFlatTop,
-                forceFlatBottom = resolvedForceFlatBottom,
+                forceFlatBottom = forceFlatBottom,
                 content = content
             )
         )
@@ -127,15 +126,7 @@ class SegmentedColumnScope {
         isInsideExpandableBody = true
         parentVisibilityMask = previousVisibilityMask && animatedVisibility && expanded
 
-        val headerIndex = items.lastIndex
         bottomContent()
-
-        if (!previousInsideBody) {
-            val lastVisibleIndex = items.indexOfLast { it.visible }
-            if (lastVisibleIndex >= headerIndex) {
-                items[lastVisibleIndex] = items[lastVisibleIndex].copy(forceFlatBottom = false)
-            }
-        }
 
         isInsideExpandableBody = previousInsideBody
         parentVisibilityMask = previousVisibilityMask
@@ -155,7 +146,6 @@ fun SegmentedColumn(
     ),
     content: SegmentedColumnScope.() -> Unit
 ) {
-    val themeConfig: ThemeConfig = koinInject()
     val scope = SegmentedColumnScope().apply(content)
     val allItems = scope.items
 
@@ -205,22 +195,17 @@ fun SegmentedColumn(
                         val baseTopRadius = if (isFirst) 16.dp else 5.dp
                         val baseBottomRadius = if (isLast) 16.dp else 5.dp
 
-                        // Blurred backgrounds must be rendered as one continuous group. Keep
-                        // only the outer corners rounded, regardless of item-level overrides.
-                        val forceFlatTop =
-                            if (themeConfig.isEnableBlurExp) !isFirst else itemData.forceFlatTop
-                        val forceFlatBottom =
-                            if (themeConfig.isEnableBlurExp) !isLast else itemData.forceFlatBottom
-
-                        val targetTopRadius = if (forceFlatTop) 0.dp else baseTopRadius
+                        val targetTopRadius = if (itemData.forceFlatTop) 0.dp else baseTopRadius
                         val targetBottomRadius =
-                            if (forceFlatBottom) 0.dp else baseBottomRadius
+                            if (itemData.forceFlatBottom) 0.dp else baseBottomRadius
 
                         val isDynamicDpSupported =
                             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
                         val currentTopRadius = if (isDynamicDpSupported) {
                             animateDpAsState(targetTopRadius, dpSpring, label = "TopRadius").value
                         } else targetTopRadius
+
                         val currentBottomRadius = if (isDynamicDpSupported) {
                             animateDpAsState(
                                 targetBottomRadius,
@@ -236,11 +221,8 @@ fun SegmentedColumn(
                             bottomEnd = max(0.dp, currentBottomRadius)
                         )
 
-                        val targetTopPadding =
-                            if (themeConfig.isEnableBlurExp) 0.dp else { // No segmented allowed in blured
-                                itemData.customTopPadding
-                                    ?: (if (isFirst) 0.dp else ListItemDefaults.SegmentedGap)
-                            }
+                        val targetTopPadding = itemData.customTopPadding
+                            ?: (if (isFirst) 0.dp else ListItemDefaults.SegmentedGap)
                         val currentTopPadding = if (isDynamicDpSupported) {
                             animateDpAsState(targetTopPadding, dpSpring, label = "TopPadding").value
                         } else targetTopPadding
@@ -284,14 +266,7 @@ fun SegmentedColumn(
                                 }
                         ) {
                             CompositionLocalProvider(LocalSegmentedItemShape provides shape) {
-                                Column(
-                                    modifier = Modifier.padding(
-                                        top = max(
-                                            currentTopPadding,
-                                            0.dp
-                                        )
-                                    )
-                                ) {
+                                Column(modifier = Modifier.padding(top = currentTopPadding)) {
                                     itemData.content(shape)
                                 }
                             }

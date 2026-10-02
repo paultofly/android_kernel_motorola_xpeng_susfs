@@ -5,11 +5,11 @@ plugins {
     alias(libs.plugins.androidx.baselineprofile)
 }
 
-val androidCompileSdkVersion = rootProject.extra["androidCompileSdkVersion"] as Int
-val androidMinSdkVersion = rootProject.extra["androidMinSdkVersion"] as Int
-val androidTargetSdkVersion = rootProject.extra["androidTargetSdkVersion"] as Int
-val androidSourceCompatibility = rootProject.extra["androidSourceCompatibility"] as JavaVersion
-val androidTargetCompatibility = rootProject.extra["androidTargetCompatibility"] as JavaVersion
+val androidCompileSdkVersion: Int by rootProject.extra
+val androidMinSdkVersion: Int by rootProject.extra
+val androidTargetSdkVersion: Int by rootProject.extra
+val androidSourceCompatibility: JavaVersion by rootProject.extra
+val androidTargetCompatibility: JavaVersion by rootProject.extra
 
 android {
     namespace = "com.resukisu.resukisu.baselineprofile"

@@ -1,6 +1,4 @@
-afa83cb784461932ea8bddb53a5fae1569c6986c2d1697f8bf48b0a83564eacc  Image
-f2f3b8a12de297734366bd8642386d8d73dfc2957bbec6c4e2963bbf9713209c  boot_ksu.img
-# 2026-10-02 full clean build, RMNET_CORE/CTL builtin (mobile data fix v2)
-# root cause: vendor rmnet_core.ko (stock 5.4.210) failed symbol check on our kernel
-# rmnet_core/ctl now compiled into vmlinux (876 rmnet symbols); offload/shs stay modular
-# WiFi 模块未重编(BUILD_WLAN=false),沿用 2026-10-01 产物(vermagic 同为 5.4.302-moto)
+aed924c94f80358ca526ae3ccdf9dfa224eccbfa7cf06ba920402be9a3f21b08  Image
+75346dac61466c6660113a9d35cef6a55cbe1caa8e9f5e0ca4420b4ad7b5f672  boot_ksu.img
+# 2026-10-02 incr build: BBRv3 + TCP Brutal restored, DEFAULT_BBR=y (on rmnet-fix base)
+# rmnet_core/ctl remain builtin; WiFi 模块未重编(BUILD_WLAN=false),沿用 2026-10-01 产物

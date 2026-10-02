@@ -9,16 +9,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
+import com.resukisu.resukisu.Natives
 import com.resukisu.resukisu.R
-import com.resukisu.resukisu.domain.model.AppProfile
 import com.resukisu.resukisu.ui.component.settings.SettingsSwitchWidget
 
 @Composable
 fun AppProfileConfig(
     enabled: Boolean,
-    profile: AppProfile,
-    defaultUmountModules: Boolean = profile.umountModules,
-    onProfileChange: (AppProfile) -> Unit,
+    profile: Natives.Profile,
+    onProfileChange: (Natives.Profile) -> Unit,
 ) {
     SettingsSwitchWidget(
         icon = Icons.TwoTone.FolderDelete,
@@ -27,7 +26,7 @@ fun AppProfileConfig(
         checked = if (enabled) {
             profile.umountModules
         } else {
-            defaultUmountModules
+            Natives.isDefaultUmountModules()
         },
         enabled = enabled,
         onCheckedChange = {
@@ -44,7 +43,7 @@ fun AppProfileConfig(
 @Preview
 @Composable
 private fun AppProfileConfigPreview() {
-    var profile by remember { mutableStateOf(AppProfile("")) }
+    var profile by remember { mutableStateOf(Natives.Profile("")) }
     AppProfileConfig(enabled = false, profile = profile) {
         profile = it
     }

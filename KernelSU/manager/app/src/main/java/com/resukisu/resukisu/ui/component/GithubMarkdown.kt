@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -33,17 +34,21 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.net.toUri
 import androidx.webkit.WebViewAssetLoader
-import com.resukisu.resukisu.data.network.WebResourceRepository
+import com.resukisu.resukisu.ksuApp
 import com.resukisu.resukisu.ui.activity.util.adjustLightnessArgb
 import com.resukisu.resukisu.ui.activity.util.cssColorFromArgb
 import com.resukisu.resukisu.ui.activity.util.ensureVisibleByMix
 import com.resukisu.resukisu.ui.activity.util.relativeLuminance
 import com.resukisu.resukisu.ui.theme.ThemeConfig
 import com.resukisu.resukisu.ui.theme.isInDarkTheme
-import org.koin.compose.koinInject
+import okhttp3.Headers.Companion.toHeaders
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okio.IOException
+import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import kotlin.math.abs
-
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -53,8 +58,7 @@ fun GithubMarkdown(
     loading: MutableState<Boolean> = remember { mutableStateOf(true) },
     callerProvideLoadingIndicator: Boolean = false
 ) {
-    val themeConfig: ThemeConfig = koinInject()
-    val isDark = isInDarkTheme(themeConfig.forceDarkMode)
+    val isDark = isInDarkTheme(ThemeConfig.forceDarkMode)
     val dir = if (LocalLayoutDirection.current == LayoutDirection.Rtl) "rtl" else "ltr"
 
     val bgArgb = backgroundColor.toArgb()
@@ -118,7 +122,6 @@ fun GithubMarkdown(
 @Composable
 private fun GithubMarkdownWebView(loading: MutableState<Boolean>, html: String) {
     val scrollInterface = remember { MarkdownScrollInterface() }
-    val resourceRepository = koinInject<WebResourceRepository>()
 
     AndroidView(
         factory = { context ->
@@ -230,15 +233,26 @@ private fun GithubMarkdownWebView(loading: MutableState<Boolean>, html: String) 
                             assetLoader.shouldInterceptRequest(request.url)?.let { return it }
                             val scheme = request.url.scheme ?: return null
                             if (!scheme.startsWith("http")) return null
-                            return resourceRepository.load(
-                                url = request.url.toString(),
-                                method = request.method,
-                                requestHeaders = request.requestHeaders,
-                            )?.let { resource ->
+                            val client: OkHttpClient = ksuApp.okhttpClient
+                            val call = client.newCall(
+                                Request.Builder()
+                                    .url(request.url.toString())
+                                    .method(request.method, null)
+                                    .headers(request.requestHeaders.toHeaders())
+                                    .build()
+                            )
+                            return try {
+                                val reply: Response = call.execute()
+                                val header = reply.header("content-type", "text/plain; charset=utf-8")
+                                val contentTypes = header?.split(";\\s*".toRegex()) ?: emptyList()
+                                val mimeType = contentTypes.firstOrNull() ?: "image/*"
+                                val charset = contentTypes.getOrNull(1)?.split("=\\s*".toRegex())?.getOrNull(1) ?: "utf-8"
+                                val body = reply.body ?: return null
+                                WebResourceResponse(mimeType, charset, body.byteStream())
+                            } catch (e: IOException) {
                                 WebResourceResponse(
-                                    resource.mimeType,
-                                    resource.encoding,
-                                    resource.body,
+                                    "text/html", "utf-8",
+                                    ByteArrayInputStream(Log.getStackTraceString(e).toByteArray(StandardCharsets.UTF_8))
                                 )
                             }
                         }

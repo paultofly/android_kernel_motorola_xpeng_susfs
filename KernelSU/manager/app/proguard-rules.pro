@@ -37,8 +37,9 @@
 -dontwarn javax.lang.model.util.SimpleTypeVisitor8
 -dontwarn javax.lang.model.util.Types
 -dontwarn javax.tools.Diagnostic$Kind
+-dontwarn androidx.navigationevent.compose.RememberNavigationEventStateKt**
 -dontwarn com.yalantis.ucrop**
 -keep class com.yalantis.ucrop** { *; }
 -keep interface com.yalantis.ucrop** { *; }
 
--keep interface com.resukisu.rootService.** { *; }
+-keep interface com.resukisu.zako.** { *; }

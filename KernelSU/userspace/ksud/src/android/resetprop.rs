@@ -187,12 +187,8 @@ fn execute(cli: &Args) -> Result<()> {
     if let Some(path) = &cli.file {
         let file = File::open(path).with_context(|| format!("Failed to open {path}"))?;
         let reader = BufReader::new(file);
-        if rp
-            .load_props(reader.lines())
-            .context("Failed to load properties from file")?
-        {
-            eprintln!("resetprop: warning: rebuild is needed!");
-        }
+        rp.load_props(reader.lines())
+            .context("Failed to load properties from file")?;
         return Ok(());
     }
 
@@ -229,12 +225,8 @@ fn execute(cli: &Args) -> Result<()> {
     match (name, value) {
         // resetprop name value (set)
         (Some(name), Some(value)) => {
-            if rp
-                .set(name, value)
-                .with_context(|| format!("Failed to set {name}"))?
-            {
-                eprintln!("resetprop: warning: rebuild is needed!");
-            }
+            rp.set(name, value)
+                .with_context(|| format!("Failed to set {name}"))?;
         }
 
         // resetprop name (get)
@@ -260,30 +252,6 @@ fn execute(cli: &Args) -> Result<()> {
     Ok(())
 }
 
-fn direct_resetprop() -> ResetProp {
-    ResetProp {
-        skip_svc: true,
-        persistent: false,
-        persist_only: false,
-        verbose: false,
-        show_context: false,
-        rebuild: false,
-    }
-}
-
-pub(crate) fn get_property_direct(name: &str) -> Result<Option<String>> {
-    sys_prop::init().context("Failed to initialize system property API")?;
-    Ok(direct_resetprop().get(name))
-}
-
-pub(crate) fn set_property_direct(name: &str, value: &str) -> Result<()> {
-    sys_prop::init().context("Failed to initialize system property API")?;
-    direct_resetprop()
-        .set(name, value)
-        .with_context(|| format!("Failed to set {name}"))?;
-    Ok(())
-}
-
 /// Load system.prop file using internal resetprop API.
 ///
 /// Equivalent to `resetprop -n --file <path>`.
@@ -301,15 +269,8 @@ pub fn load_system_prop_file(path: &Path) -> Result<()> {
 
     let file = File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
     let reader = BufReader::new(file);
-    if rp
-        .load_props(reader.lines())
-        .with_context(|| format!("Failed to load properties from {}", path.display()))?
-    {
-        log::warn!(
-            "warning: after loaded prop file from {}, rebuild is needed!",
-            path.display()
-        );
-    }
+    rp.load_props(reader.lines())
+        .with_context(|| format!("Failed to load properties from {}", path.display()))?;
 
     info!("Loaded system.prop from {}", path.display());
     Ok(())

@@ -26,7 +26,7 @@ rmnet_core: Unknown symbol rtnl_link_register (err -22)
 直接编入 vmlinux, 绕开厂商模块的符号版本校验。
 (`rmnet_offload`/`rmnet_shs` 保持模块化, 为可选硬件加速, 其厂商版加载失败不影响基本上网)
 
-## 本版包含的特性
+## 本版包含的特性 (2026-10-02 更新: BBRv3+Brutal 已恢复)
 
 | 特性 | 状态 | 说明 |
 |------|------|------|
@@ -34,7 +34,7 @@ rmnet_core: Unknown symbol rtnl_link_register (err -22)
 | USER_NS (用户命名空间) | ✅ | DroidSpaces 等容器需要 |
 | NoMount 路径重定向 | ✅ | 默认空转, 无用户载荷时无行为 |
 | LZ4K 压缩算法 | ✅ | 华为 LZ4K/LZ4KD, 惰性(无调用方) |
-| TCP 默认拥塞控制 | cubic | 上游默认, 未改动 |
+| TCP 拥塞控制 | **BBRv3 默认** | BBRv3 backport + TCP Brutal; fq 编入(非默认 qdisc) |
 | rmnet_core/ctl | ✅ 内建 | 移动数据修复 |
 | WiFi | ✅ | 厂商 qca_cld3 模块(vermagic 匹配 5.4.302-moto) |
 
@@ -59,8 +59,8 @@ dmesg 中可能出现 vendor `rmnet_core.ko` insmod 失败的日志 —— 属�
 ## 校验值 (SHA-256)
 
 ```
-afa83cb784461932ea8bddb53a5fae1569c6986c2d1697f8bf48b0a83564eacc  Image
-f2f3b8a12de297734366bd8642386d8d73dfc2957bbec6c4e2963bbf9713209c  boot_ksu.img
+aed924c94f80358ca526ae3ccdf9dfa224eccbfa7cf06ba920402be9a3f21b08  Image
+75346dac61466c6660113a9d35cef6a55cbe1caa8e9f5e0ca4420b4ad7b5f672  boot_ksu.img
 ```
 
 ## 源码

@@ -10,6 +10,7 @@ import android.webkit.WebView
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.topjohnwu.superuser.Shell
 
 sealed class WebUIEvent {
     data object Loading : WebUIEvent()
@@ -24,6 +25,7 @@ sealed class WebUIEvent {
 
 class WebUIState {
     var webView: WebView? = null
+    var rootShell: Shell? = null
     lateinit var modDir: String
     var moduleName: String = ""
 
@@ -74,5 +76,6 @@ class WebUIState {
             view.destroy()
         }
         webView = null
+        rootShell?.close()
     }
 }

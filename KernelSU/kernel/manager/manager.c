@@ -134,30 +134,19 @@ void ksu_unregister_manager_by_signature_index(u8 signature_index)
             }
 
             list_del_rcu(&pos->list);
+            spin_unlock(&ksu_manager_list_write_lock);
             kfree_rcu(pos, rcu);
-        } else {
-            last_each_alive_appid = pos->appid;
+            return;
         }
+
+        last_each_alive_appid = pos->appid;
     }
 
     spin_unlock(&ksu_manager_list_write_lock);
 
     if (mark_another_manager)
         ksu_last_manager_appid = last_each_alive_appid;
-}
-
-void ksu_unregister_all_manager(void)
-{
-    struct ksu_manager_node *node, *pos, *tmp;
-
-    spin_lock(&ksu_manager_list_write_lock);
-
-    list_for_each_entry_safe (pos, tmp, &ksu_manager_appid_list, list) {
-        list_del_rcu(&pos->list);
-        kfree_rcu(pos, rcu);
-    }
-
-    spin_unlock(&ksu_manager_list_write_lock);
+    return;
 }
 
 bool ksu_has_manager(void)
@@ -174,36 +163,27 @@ bool ksu_has_manager(void)
 int ksu_handle_get_managers_cmd(struct ksu_get_managers_cmd __user *arg, struct ksu_get_managers_cmd *cmd)
 {
     struct ksu_manager_node *pos;
-    struct ksu_manager_entry *entries;
-    u16 max_allowed = cmd->count;
     int count = 0;
-    int copy_count;
-
-    entries = kcalloc(max_allowed, sizeof(*entries), GFP_KERNEL);
-    if (!entries && max_allowed)
-        return -ENOMEM;
+    u16 max_allowed = cmd->count;
 
     rcu_read_lock();
     list_for_each_entry_rcu (pos, &ksu_manager_appid_list, list) {
         if (count < max_allowed) {
-            entries[count].uid = pos->appid;
-            entries[count].signature_index = pos->signature_index;
-        }
+            struct ksu_manager_entry entry = { .uid = pos->appid, .signature_index = pos->signature_index };
 
+            void __user *dest = (void __user *)((char *)arg + sizeof(struct ksu_get_managers_cmd) +
+                                                (count * sizeof(struct ksu_manager_entry)));
+
+            if (copy_to_user(dest, &entry, sizeof(entry))) {
+                rcu_read_unlock();
+                return -EFAULT;
+            }
+        }
         count++;
     }
     rcu_read_unlock();
 
     cmd->total_count = count;
-
-    copy_count = min_t(int, count, max_allowed);
-
-    if (copy_count && copy_to_user((char __user *)arg + sizeof(*cmd), entries, copy_count * sizeof(*entries))) {
-        kfree(entries);
-        return -EFAULT;
-    }
-
-    kfree(entries);
     return 0;
 }
 

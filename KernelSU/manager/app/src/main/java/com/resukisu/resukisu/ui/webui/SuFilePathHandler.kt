@@ -5,8 +5,11 @@ import android.util.Log
 import android.webkit.WebResourceResponse
 import androidx.annotation.WorkerThread
 import androidx.webkit.WebViewAssetLoader
-import com.resukisu.resukisu.data.webui.WebUiRepository
+import com.resukisu.resukisu.ui.webui.MonetColorsProvider.getColorsCss
 import com.resukisu.resukisu.ui.webui.SuFilePathHandler.Companion.DEFAULT_MIME_TYPE
+import com.topjohnwu.superuser.Shell
+import com.topjohnwu.superuser.io.SuFile
+import com.topjohnwu.superuser.io.SuFileInputStream
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.IOException
@@ -35,10 +38,9 @@ import java.util.zip.GZIPInputStream
  */
 class SuFilePathHandler(
     directory: File,
-    private val webUiRepository: WebUiRepository,
+    private val shell: Shell,
     private val insetsSupplier: InsetsSupplier,
-    private val onInsetsRequestedListener: ((Boolean) -> Unit)?,
-    private val colorsCssProvider: () -> String,
+    private val onInsetsRequestedListener: ((Boolean) -> Unit)?
 ) : WebViewAssetLoader.PathHandler {
 
     private val directory: File
@@ -104,7 +106,7 @@ class SuFilePathHandler(
         }
 
         if (path == "internal/colors.css") {
-            val css = colorsCssProvider()
+            val css = getColorsCss()
             return WebResourceResponse(
                 "text/css",
                 "utf-8",
@@ -115,10 +117,9 @@ class SuFilePathHandler(
         try {
             val file = getCanonicalFileIfChild(directory, path)
             if (file != null) {
-                val inputStream = webUiRepository.openFile(file.absolutePath)
-                    ?: return WebResourceResponse(null, null, null)
+                val inputStream = openFile(file, shell)
                 val mimeType = guessMimeType(path)
-                return WebResourceResponse(mimeType, null, handleSvgzStream(path, inputStream))
+                return WebResourceResponse(mimeType, null, inputStream)
             } else {
                 Log.e(
                     TAG,
@@ -177,6 +178,16 @@ class SuFilePathHandler(
             } else {
                 stream
             }
+        }
+
+        @JvmStatic
+        @Throws(IOException::class)
+        fun openFile(file: File, shell: Shell): InputStream {
+            val suFile = SuFile(file.absolutePath).apply {
+                setShell(shell)
+            }
+            val fis = SuFileInputStream.open(suFile)
+            return handleSvgzStream(file.path, fis)
         }
 
         /**

@@ -57,9 +57,6 @@ object Natives {
     val isLkmMode: Boolean
         external get
 
-    val isLkmBundled: Boolean
-        external get
-
     val isLateLoadMode: Boolean
         external get
 
@@ -69,11 +66,11 @@ object Natives {
     val isPrBuild: Boolean
         external get
 
-    enum class KernelPatchImplementation {
+    enum class KernelPatchImplement {
         /**
          * Kernel Patch was not found in this kernel
          */
-        NONE,
+        NO_KERNEL_PATCH_SUPPORT,
 
         /**
          * Detected Kernel Patch official in this kernel
@@ -82,7 +79,7 @@ object Natives {
          *
          * @see <a href="https://github.com/bmax121/KernelPatch">https://github.com/bmax121/KernelPatch</a>
          */
-        OFFICIAL,
+        KERNEL_PATCH_OFFICIAL,
 
         /**
          * Detected Rifsxd's Kernel Patch fork in this kernel
@@ -100,15 +97,15 @@ object Natives {
          *
          * @see <a href="https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch">https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch</a>
          */
-        SUKISU,
+        SUKISU_KERNEL_PATCH_PATCH
     }
 
     /**
-     * Get Kernel Patch implementation
+     * Get Kernel Patch Implement
      * @return type
-     * @throws IllegalStateException when can't access KernelPatchImplementation enum
+     * @throws IllegalStateException when can't access KernelPatchImplement enum
      */
-    external fun getKernelPatchImplementation(): KernelPatchImplementation
+    external fun getKernelPatchImplement(): KernelPatchImplement
 
     external fun uidShouldUmount(uid: Int): Boolean
 
@@ -159,10 +156,25 @@ object Natives {
     external fun getHookType(): String
 
     /**
+     * Set dynamic managerature configuration
+     * @param size APK signature size
+     * @param hash APK signature hash (64 character hex string)
+     * @return true if successful, false otherwise
+     */
+    external fun setDynamicManager(size: Int, hash: String): Boolean
+
+
+    /**
      * Get current dynamic manager configuration
      * @return DynamicManagerConfig object containing current configuration, or null if not set
      */
     external fun getDynamicManager(): DynamicManagerConfig?
+
+    /**
+     * Clear dynamic manager configuration
+     * @return true if successful, false otherwise
+     */
+    external fun clearDynamicManager(): Boolean
 
     /**
      * Get active managers list
@@ -200,8 +212,12 @@ object Natives {
     val managerUAPIVersion: Int
         external get
 
-    fun isFullFeatured(): Boolean {
-        return isManager && kernelUAPIVersion == managerUAPIVersion
+    fun checkUAPIMismatch(): Boolean {
+        return kernelUAPIVersion != managerUAPIVersion
+    }
+
+    fun requireNewKernel(): Boolean {
+        return (version != -1 && version < MINIMAL_SUPPORTED_KERNEL) || checkUAPIMismatch()
     }
 
     @Immutable
@@ -286,6 +302,9 @@ object Natives {
 
 fun List<RootProfileFlag>.toRawFlags(): Long =
     fold(0L) { acc, flag -> acc.or(1L.shl(flag.ordinal)) }
+
+fun List<RootProfileFlag>.toOrdinalList(): List<Int> =
+    map { it.ordinal }
 
 fun Long.toRootProfileFlags(): List<RootProfileFlag> =
     RootProfileFlag.entries.filter { 1L.shl(it.ordinal).and(this) != 0L }.toList()

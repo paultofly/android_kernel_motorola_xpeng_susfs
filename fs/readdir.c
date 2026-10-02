@@ -20,15 +20,16 @@
 #include <linux/syscalls.h>
 #include <linux/unistd.h>
 #include <linux/compat.h>
-#include <linux/uaccess.h>
-
-#include <asm/unaligned.h>
-
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 #include <linux/susfs_def.h>
 extern int susfs_get_data_path(struct path *path);
 extern bool susfs_is_inode_sus_path(struct inode *inode);
 #endif
+
+#include <linux/uaccess.h>
+
+#include <asm/unaligned.h>
+
 /*
  * Note the "unsafe_put_user() semantics: we goto a
  * label for errors.
@@ -428,6 +429,7 @@ static int filldir64(struct dir_context *ctx, const char *name, int namlen,
 orig_flow:
 #endif
 	dirent = buf->current_dir;
+
 	prev = (void __user *)dirent - prev_reclen;
 	if (!user_access_begin(prev, reclen + prev_reclen))
 		goto efault;
@@ -634,10 +636,10 @@ struct compat_linux_dirent {
 struct compat_getdents_callback {
 	struct dir_context ctx;
 	struct compat_linux_dirent __user *current_dir;
-	struct compat_linux_dirent __user *previous;
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	struct super_block *sb;
 #endif
+	struct compat_linux_dirent __user *previous;
 	int count;
 	int error;
 };

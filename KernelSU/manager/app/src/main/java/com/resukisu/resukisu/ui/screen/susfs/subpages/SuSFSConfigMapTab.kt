@@ -22,8 +22,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.resukisu.resukisu.R
+import com.resukisu.resukisu.data.susfs.SuSFSConfigHelper
 import com.resukisu.resukisu.ui.component.settings.SettingsJumpPageWidget
 import com.resukisu.resukisu.ui.component.settings.SettingsTextFieldWidget
 import com.resukisu.resukisu.ui.screen.susfs.RegisterSuSFSRefresh
@@ -34,13 +36,7 @@ import com.resukisu.resukisu.ui.screen.susfs.component.SuSFSDescriptionCard
 import com.resukisu.resukisu.ui.screen.susfs.component.susfsEntryList
 import com.resukisu.resukisu.ui.screen.susfs.component.toImportedEntryLines
 import com.resukisu.resukisu.ui.util.LocalSnackbarHost
-import com.resukisu.resukisu.ui.util.showReplacingSnackbar
-import com.resukisu.resukisu.ui.viewmodel.SuSFSUiAction
-import com.resukisu.resukisu.ui.viewmodel.SuSFSViewModel
-import com.resukisu.resukisu.ui.viewmodel.awaitSuSFSBoolean
-import com.resukisu.resukisu.ui.viewmodel.awaitSuSFSConfig
 import kotlinx.coroutines.launch
-import org.koin.compose.viewmodel.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,8 +45,8 @@ fun SusMapTab(
     innerPadding: PaddingValues,
     onRegisterRefresh: SuSFSRefreshRegistrar,
 ) {
-    val configHelper = koinViewModel<SuSFSViewModel>()
     val snackbarHost = LocalSnackbarHost.current
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     var entries by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -80,7 +76,6 @@ fun SusMapTab(
     val noEntriesMsg = stringResource(R.string.susfs_entry_no_entries)
     val noEntriesHint = stringResource(R.string.susfs_entry_no_entries_hint)
     val operationFailedMsg = stringResource(R.string.susfs_operation_failed)
-    val susfsEntryImportSuccess = stringResource(R.string.susfs_entry_import_success)
 
     LazyColumn(
         modifier = Modifier
@@ -145,18 +140,14 @@ fun SusMapTab(
                 var successCount = 0
                 var failCount = 0
                 paths.forEach { path ->
-                    if (awaitSuSFSBoolean(configHelper) { reply ->
-                            SuSFSUiAction.AddSusMap(path, reply)
-                        }) {
+                    if (SuSFSConfigHelper.addSusMap(path)) {
                         successCount++
                     } else {
                         failCount++
                     }
                 }
                 if (successCount > 0) {
-                    entries = awaitSuSFSConfig(configHelper) { reply ->
-                        SuSFSUiAction.Refresh(reply)
-                    }?.sus_map.orEmpty()
+                    entries = SuSFSConfigHelper.refreshConfig().sus_map
                 }
                 if (paths.size == 1) {
                     if (successCount > 0) {
@@ -165,13 +156,13 @@ fun SusMapTab(
                         snackbarMessage = operationFailedMsg
                     }
                 } else {
-                    snackbarMessage = susfsEntryImportSuccess.format(successCount, failCount)
+                    snackbarMessage = context.getString(R.string.susfs_entry_import_success, successCount, failCount)
                     if (failCount == 0) {
                         showManualAdd = false
                     }
                 }
                 isLoading = false
-                snackbarMessage?.let { snackbarHost.showReplacingSnackbar(it) }
+                snackbarMessage?.let { snackbarHost.showSnackbar(it) }
             }
         },
         formContent = {
@@ -200,18 +191,14 @@ fun SusMapTab(
             onDelete = {
                 scope.launch {
                     isLoading = true
-                    val ok = awaitSuSFSBoolean(configHelper) { reply ->
-                        SuSFSUiAction.RemoveSusMap(path, reply)
-                    }
+                    val ok = SuSFSConfigHelper.removeSusMap(path)
                     if (ok) {
-                        entries = awaitSuSFSConfig(configHelper) { reply ->
-                            SuSFSUiAction.Refresh(reply)
-                        }?.sus_map.orEmpty()
+                        entries = SuSFSConfigHelper.refreshConfig().sus_map
                         detailItem = null
                     } else {
                         isLoading = false
                         scope.launch {
-                            snackbarHost.showReplacingSnackbar(operationFailedMsg)
+                            snackbarHost.showSnackbar(operationFailedMsg)
                         }
                     }
                     isLoading = false

@@ -7,10 +7,19 @@ use std::{
     collections::{BTreeMap, HashMap},
     env::var as env_var,
     fs::{File, Permissions, canonicalize, copy, remove_dir_all, rename, set_permissions},
-    io::{Cursor, Read, Seek, Write},
+    io::{Cursor, Write},
     path::{Path, PathBuf},
     process::Command,
+    str::FromStr,
 };
+
+use anyhow::{Context, Result, anyhow, bail, ensure};
+use const_format::concatcp;
+use is_executable::is_executable;
+use java_properties::PropertiesIter;
+use log::{debug, error, info, warn};
+use regex_lite::Regex;
+use zip_extensions::zip_extract::zip_extract_file_to_memory;
 
 use crate::{
     android::{
@@ -23,15 +32,9 @@ use crate::{
             get_zip_uncompressed_size, getprop, switch_cgroups,
         },
     },
-    assets, banner, defs,
+    assets, defs,
     defs::{MODULE_DIR, MODULE_UPDATE_DIR, UPDATE_FILE_NAME},
 };
-use anyhow::{Context, Result, anyhow, bail, ensure};
-use const_format::concatcp;
-use is_executable::is_executable;
-use java_properties::PropertiesIter;
-use log::{debug, error, info, warn};
-use regex_lite::Regex;
 
 const INSTALLER_CONTENT: &str = include_str!("./installer.sh");
 const INSTALL_MODULE_SCRIPT: &str = concatcp!(
@@ -522,29 +525,11 @@ pub fn handle_updated_modules() -> Result<()> {
     Ok(())
 }
 
-fn read_module_prop_from_archive<R>(
-    archive: &mut zip::ZipArchive<R>,
-) -> Result<HashMap<String, String>>
-where
-    R: Read + Seek,
-{
-    let mut buffer = Vec::new();
-    archive.by_name("module.prop")?.read_to_end(&mut buffer)?;
-
-    let mut module_prop = HashMap::new();
-    PropertiesIter::new_with_encoding(Cursor::new(buffer), encoding_rs::UTF_8).read_into(
-        |k, v| {
-            module_prop.insert(k, v);
-        },
-    )?;
-    Ok(module_prop)
-}
-
 fn install_module_to_system(zip: &str) -> Result<()> {
     ensure_boot_completed()?;
 
     // print banner
-    println!("{}", banner::print_banner());
+    println!(include_str!("../banner"));
 
     assets::ensure_binaries(false).with_context(|| "Failed to extract assets")?;
 
@@ -552,12 +537,19 @@ fn install_module_to_system(zip: &str) -> Result<()> {
     ensure_dir_exists(defs::WORKING_DIR).with_context(|| "Failed to create working dir")?;
     ensure_dir_exists(defs::BINARY_DIR).with_context(|| "Failed to create bin dir")?;
 
-    // Open the archive once and reuse it for metadata reads, size calculation, and extraction.
-    let zip_path = PathBuf::from(zip);
+    // read the module_id from zip, if failed it will return early.
+    let mut buffer: Vec<u8> = Vec::new();
+    let entry_path = PathBuf::from_str("module.prop")?;
+    let zip_path = PathBuf::from_str(zip)?;
     let zip_path = zip_path.canonicalize()?;
-    let file = File::open(&zip_path)?;
-    let mut archive = zip::ZipArchive::new(file)?;
-    let module_prop = read_module_prop_from_archive(&mut archive)?;
+    zip_extract_file_to_memory(&zip_path, &entry_path, &mut buffer)?;
+
+    let mut module_prop = HashMap::new();
+    PropertiesIter::new_with_encoding(Cursor::new(buffer), encoding_rs::UTF_8).read_into(
+        |k, v| {
+            module_prop.insert(k, v);
+        },
+    )?;
     info!("module prop: {module_prop:?}");
 
     let Some(module_id) = module_prop.get("id") else {
@@ -620,7 +612,7 @@ fn install_module_to_system(zip: &str) -> Result<()> {
         }
     }
 
-    let zip_uncompressed_size = get_zip_uncompressed_size(&mut archive)?;
+    let zip_uncompressed_size = get_zip_uncompressed_size(zip)?;
     info!(
         "zip uncompressed size: {}",
         humansize::format_size(zip_uncompressed_size, humansize::DECIMAL)
@@ -641,6 +633,8 @@ fn install_module_to_system(zip: &str) -> Result<()> {
 
     // Extract zip to target directory
     println!("- Extracting module files");
+    let file = File::open(zip)?;
+    let mut archive = zip::ZipArchive::new(file)?;
     archive.extract(&updated_dir)?;
 
     // Set permission and selinux context for $MOD/system
@@ -758,8 +752,6 @@ pub fn enable_module(id: &str) -> Result<()> {
 }
 
 pub fn disable_module(id: &str) -> Result<()> {
-    validate_module_id(id)?;
-
     let module_path = Path::new(defs::MODULE_DIR).join(id);
     ensure!(module_path.exists(), "Module {id} not found");
 

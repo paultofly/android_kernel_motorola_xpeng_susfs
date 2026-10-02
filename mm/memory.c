@@ -72,9 +72,6 @@
 #include <linux/dax.h>
 #include <linux/oom.h>
 #include <linux/numa.h>
-#ifdef CONFIG_KSU_SUSFS_SUS_MAP
-#include <linux/susfs_def.h>
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 
 #include <trace/events/kmem.h>
 
@@ -85,6 +82,10 @@
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
 #include <asm/pgtable.h>
+
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+#include <linux/susfs_def.h>
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 
 #include "internal.h"
 

@@ -8,12 +8,6 @@
 #include <linux/ptrace.h>
 #include <linux/static_key.h>
 #include <linux/slab.h>
-#include <linux/version.h>
-
-// https://github.com/torvalds/linux/commit/68db0cf10678630d286f4bbbbdfa102951a35faa
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
-#include <linux/sched/task_stack.h>
-#endif
 
 #include "adb_root.h"
 #include "arch.h"
@@ -47,8 +41,9 @@ static inline long is_exec_adbd(const char *filename)
 }
 
 #ifdef CONFIG_KSU_TRACEPOINT_HOOK
-static long is_exec_adbd_tracepoint(const char __user *filename_user)
+static long is_exec_adbd_tracepoint(struct pt_regs *regs)
 {
+    char __user *filename_user = (char __user *)PT_REGS_PARM1(regs);
     // should be bigger than `/apex/com.android.adbd/bin/adbd`
     char buf[40];
     char __user *fn;
@@ -195,9 +190,14 @@ out_release_env_p:
 }
 
 #ifdef CONFIG_KSU_TRACEPOINT_HOOK
-static long do_ksu_adb_root_handle_execve(const char __user *filename_user, struct pt_regs *regs, unsigned long *envp_p)
+static long setup_ld_preload_tracepoint(struct pt_regs *regs)
 {
-    if (likely(is_exec_adbd_tracepoint(filename_user) != 1)) {
+    return setup_ld_preload((void ***)&PT_REGS_PARM3(regs));
+}
+
+static long do_ksu_adb_root_handle_execve(struct pt_regs *regs)
+{
+    if (likely(is_exec_adbd_tracepoint(regs) != 1)) {
         return 0;
     }
 
@@ -205,7 +205,7 @@ static long do_ksu_adb_root_handle_execve(const char __user *filename_user, stru
         return 0;
     }
 
-    long ret = setup_ld_preload((void ***)envp_p);
+    long ret = setup_ld_preload_tracepoint(regs);
     if (ret) {
         return ret;
     }
@@ -220,17 +220,7 @@ long ksu_adb_root_handle_execve_tracepoint(struct pt_regs *regs)
     // Tracepoint Syscall Redirect hook always in GKI2
     // So there no need to check for modern static key interface
     if (static_branch_unlikely(&ksu_adb_root)) {
-        return do_ksu_adb_root_handle_execve((const char __user *)PT_REGS_SYSCALL_PARM1(regs), regs,
-                                             (unsigned long *)&PT_REGS_PARM3(regs));
-    }
-    return 0;
-}
-
-long ksu_adb_root_handle_execveat_tracepoint(struct pt_regs *regs)
-{
-    if (static_branch_unlikely(&ksu_adb_root)) {
-        return do_ksu_adb_root_handle_execve((const char __user *)PT_REGS_PARM2(regs), regs,
-                                             (unsigned long *)&PT_REGS_SYSCALL_PARM4(regs));
+        return do_ksu_adb_root_handle_execve(regs);
     }
     return 0;
 }

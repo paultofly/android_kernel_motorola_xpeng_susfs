@@ -1,32 +1,36 @@
 package com.resukisu.resukisu.ui.webui
 
 import android.app.Activity
+import android.content.pm.ApplicationInfo
 import android.os.Handler
 import android.os.Looper
 import android.text.TextUtils
 import android.view.Window
 import android.webkit.JavascriptInterface
 import android.widget.Toast
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.resukisu.resukisu.data.packageinfo.InstalledPackageRepository
-import com.resukisu.resukisu.data.webui.WebUiRepository
+import com.resukisu.resukisu.ui.util.createRootShell
+import com.resukisu.resukisu.ui.util.listModules
+import com.resukisu.resukisu.ui.util.withNewRootShell
+import com.resukisu.resukisu.ui.viewmodel.SuperUserViewModel
+import com.topjohnwu.superuser.CallbackList
+import com.topjohnwu.superuser.ShellUtils
+import com.topjohnwu.superuser.internal.UiThreadHandler
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.CompletableFuture
 
 @Suppress("unused")
-class WebViewInterface(
-    private val state: WebUIState,
-    private val packageRepository: InstalledPackageRepository,
-    private val webUiRepository: WebUiRepository,
-) {
+class WebViewInterface(private val state: WebUIState) {
     private val webView get() = state.webView!!
     private val modDir get() = state.modDir
 
     @JavascriptInterface
     fun exec(cmd: String): String {
-        return webUiRepository.execute(cmd).stdout
+        return withNewRootShell(true) { ShellUtils.fastCmd(this, cmd) }
     }
 
     @JavascriptInterface
@@ -61,9 +65,11 @@ class WebViewInterface(
         processOptions(finalCommand, options)
         finalCommand.append(cmd)
 
-        val result = webUiRepository.execute(finalCommand.toString())
-        val stdout = result.stdout
-        val stderr = result.stderr
+        val result = withNewRootShell(true) {
+            newJob().add(finalCommand.toString()).to(ArrayList(), ArrayList()).exec()
+        }
+        val stdout = result.out.joinToString(separator = "\n")
+        val stderr = result.err.joinToString(separator = "\n")
 
         val jsCode =
             "javascript: (function() { try { ${callbackFunc}(${result.code}, ${
@@ -94,6 +100,8 @@ class WebViewInterface(
             finalCommand.append(command)
         }
 
+        val shell = createRootShell(true)
+
         val emitData = fun(name: String, data: String) {
             val jsCode =
                 "javascript: (function() { try { ${callbackFunc}.${name}.emit('data', ${
@@ -106,11 +114,24 @@ class WebViewInterface(
             }
         }
 
-        val process = webUiRepository.spawn(finalCommand.toString(), true)
-        process.start(
-            onStdout = { emitData("stdout", it) },
-            onStderr = { emitData("stderr", it) },
-            onComplete = { result ->
+        val stdout = object : CallbackList<String>(UiThreadHandler::runAndWait) {
+            override fun onAddElement(s: String) {
+                emitData("stdout", s)
+            }
+        }
+
+        val stderr = object : CallbackList<String>(UiThreadHandler::runAndWait) {
+            override fun onAddElement(s: String) {
+                emitData("stderr", s)
+            }
+        }
+
+        val future = shell.newJob().add(finalCommand.toString()).to(stdout, stderr).enqueue()
+        val completableFuture = CompletableFuture.supplyAsync {
+            future.get()
+        }
+
+        completableFuture.thenAccept { result ->
             val emitExitCode =
                 "javascript: (function() { try { ${callbackFunc}.emit('exit', ${result.code}); } catch(e) { console.error(`emitExit error: \${e}`); } })();"
             webView.post {
@@ -121,15 +142,18 @@ class WebViewInterface(
                 val emitErrCode =
                     "javascript: (function() { try { var err = new Error(); err.exitCode = ${result.code}; err.message = ${
                         JSONObject.quote(
-                            result.stderr
+                            result.err.joinToString(
+                                "\n"
+                            )
                         )
                     };${callbackFunc}.emit('error', err); } catch(e) { console.error('emitErr', e); } })();"
                 webView.post {
                     webView.loadUrl(emitErrCode)
                 }
             }
-            }
-        )
+        }.whenComplete { _, _ ->
+            runCatching { shell.close() }
+        }
     }
 
     @JavascriptInterface
@@ -166,7 +190,7 @@ class WebViewInterface(
 
     @JavascriptInterface
     fun moduleInfo(): String {
-        val moduleInfos = JSONArray(webUiRepository.listModules())
+        val moduleInfos = JSONArray(listModules())
         val currentModuleInfo = JSONObject()
         currentModuleInfo.put("moduleDir", modDir)
         val moduleId = File(modDir).name
@@ -188,11 +212,12 @@ class WebViewInterface(
 
     @JavascriptInterface
     fun listPackages(type: String): String {
-        val packageNames = packageRepository.packages.value
-            .filter { packageInfo ->
+        val packageNames = SuperUserViewModel.getCachedApps(includeManager = true)
+            .filter { appInfo ->
+                val flags = appInfo.packageInfo.applicationInfo?.flags ?: 0
                 when (type.lowercase()) {
-                    "system" -> packageInfo.isSystem
-                    "user" -> !packageInfo.isSystem
+                    "system" -> (flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                    "user" -> (flags and ApplicationInfo.FLAG_SYSTEM) == 0
                     else -> true
                 }
             }
@@ -210,18 +235,21 @@ class WebViewInterface(
     fun getPackagesInfo(packageNamesJson: String): String {
         val packageNames = JSONArray(packageNamesJson)
         val jsonArray = JSONArray()
-        val appMap = packageRepository.packages.value.associateBy { it.packageName }
+        val appMap =
+            SuperUserViewModel.getCachedApps(includeManager = true).associateBy { it.packageName }
         for (i in 0 until packageNames.length()) {
             val pkgName = packageNames.getString(i)
-            val pkg = appMap[pkgName]
-            if (pkg != null) {
+            val appInfo = appMap[pkgName]
+            if (appInfo != null) {
+                val pkg = appInfo.packageInfo
+                val app = pkg.applicationInfo
                 val obj = JSONObject()
                 obj.put("packageName", pkg.packageName)
-                obj.put("versionName", pkg.versionName)
-                obj.put("versionCode", pkg.versionCode)
-                obj.put("appLabel", pkg.appLabel)
-                obj.put("isSystem", pkg.isSystem)
-                obj.put("uid", pkg.uid)
+                obj.put("versionName", pkg.versionName ?: "")
+                obj.put("versionCode", PackageInfoCompat.getLongVersionCode(pkg))
+                obj.put("appLabel", appInfo.label)
+                obj.put("isSystem", if (app != null) ((app.flags and ApplicationInfo.FLAG_SYSTEM) != 0) else JSONObject.NULL)
+                obj.put("uid", app?.uid ?: JSONObject.NULL)
                 jsonArray.put(obj)
             } else {
                 val obj = JSONObject()

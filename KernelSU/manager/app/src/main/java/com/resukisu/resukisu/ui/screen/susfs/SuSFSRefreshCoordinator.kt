@@ -4,10 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
-import com.resukisu.resukisu.domain.model.SuSFSConfig
-import com.resukisu.resukisu.ui.viewmodel.SuSFSViewModel
-import com.resukisu.resukisu.ui.viewmodel.SuSFSUiAction
-import com.resukisu.resukisu.ui.viewmodel.awaitSuSFSConfig
+import com.resukisu.resukisu.data.susfs.SuSFSConfig
+import com.resukisu.resukisu.data.susfs.SuSFSConfigHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -19,7 +17,6 @@ internal typealias SuSFSRefreshRegistrar = (SuSFSRefreshCallback) -> (() -> Unit
 
 internal class SuSFSRefreshCoordinator(
     private val coroutineScope: CoroutineScope,
-    private val configHelper: SuSFSViewModel,
 ) {
     private val callbacks = mutableListOf<SuSFSRefreshCallback>()
     private val refreshMutex = Mutex()
@@ -32,9 +29,7 @@ internal class SuSFSRefreshCoordinator(
             coroutineScope.launch {
                 refreshMutex.withLock {
                     if (callback in callbacks) {
-                        awaitSuSFSConfig(configHelper) { reply ->
-                            SuSFSUiAction.Load(reply)
-                        }?.let { callback(it, false) }
+                        callback(SuSFSConfigHelper.loadConfig(), false)
                     }
                 }
             }
@@ -53,9 +48,11 @@ internal class SuSFSRefreshCoordinator(
         onConfigLoaded: (SuSFSConfig) -> Unit,
     ) {
         refreshMutex.withLock {
-            val config = awaitSuSFSConfig(configHelper) { reply ->
-                if (forceRefresh) SuSFSUiAction.Refresh(reply) else SuSFSUiAction.Load(reply)
-            } ?: return
+            val config = if (forceRefresh) {
+                SuSFSConfigHelper.refreshConfig()
+            } else {
+                SuSFSConfigHelper.loadConfig()
+            }
             onConfigLoaded(config)
 
             val callbacksToRefresh = callbacks.toList()

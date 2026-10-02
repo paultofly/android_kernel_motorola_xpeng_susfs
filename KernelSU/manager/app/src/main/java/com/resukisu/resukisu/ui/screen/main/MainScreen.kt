@@ -1,68 +1,56 @@
 package com.resukisu.resukisu.ui.screen.main
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.resukisu.resukisu.ui.activity.component.NavigationBar
-import com.resukisu.resukisu.ui.component.HorizontalPagerWithInteraction
 import com.resukisu.resukisu.ui.rememberMaterial3BlurBackdrop
 import com.resukisu.resukisu.ui.screen.BottomBarDestination
 import com.resukisu.resukisu.ui.theme.ThemeConfig
 import com.resukisu.resukisu.ui.theme.blurSource
 import com.resukisu.resukisu.ui.util.LocalBlurState
 import com.resukisu.resukisu.ui.util.LocalHandlePageChange
-import com.resukisu.resukisu.ui.util.LocalPagerPage
 import com.resukisu.resukisu.ui.util.LocalPagerState
-import com.resukisu.resukisu.ui.util.LocalPortraitState
 import com.resukisu.resukisu.ui.util.LocalSelectedPage
 import com.resukisu.resukisu.ui.util.LocalSnackbarHost
-import com.resukisu.resukisu.ui.viewmodel.HomeViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import org.koin.compose.koinInject
-import org.koin.compose.viewmodel.koinViewModel
-import top.yukonga.miuix.kmp.utils.PagerGestureNestedScrollConnection
-import top.yukonga.miuix.kmp.utils.PagerInterceptionMode
-import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
-import top.yukonga.miuix.kmp.utils.pagerGestureOverride
-
+import kotlinx.coroutines.withContext
 
 @Composable
-fun MainScreen(
-    pagerInterceptionMode: Int = PagerInterceptionMode.CrossAxisInterceptor.ordinal,
-) {
-    val themeConfig: ThemeConfig = koinInject()
-    val homeViewModel = koinViewModel<HomeViewModel>()
-    val homeState by homeViewModel.uiState.collectAsStateWithLifecycle()
-    val pages = remember(homeState.systemStatus.isFullFeatured) {
-        BottomBarDestination.getPages(homeState.systemStatus.isFullFeatured)
+fun MainScreen() {
+    var savedPages by rememberSaveable<MutableState<List<BottomBarDestination>>> {
+        mutableStateOf(emptyList())
+    }
+
+    val pages by produceState(initialValue = savedPages) {
+        value = withContext(Dispatchers.IO) {
+            savedPages = BottomBarDestination.getPages()
+            return@withContext savedPages
+        }
     }
 
     val coroutineScope = rememberCoroutineScope()
@@ -75,11 +63,6 @@ fun MainScreen(
     var animating by remember { mutableStateOf(false) }
     var animateJob by remember { mutableStateOf<Job?>(null) }
     var lastRequestedPage by remember { mutableIntStateOf(pagerState.currentPage) }
-
-    val pagerMode = PagerInterceptionMode.entries.getOrElse(pagerInterceptionMode) {
-        PagerInterceptionMode.Native
-    }
-    val interceptPagerGestures = pagerMode == PagerInterceptionMode.CrossAxisInterceptor
 
     val handlePageChange: (Int) -> Unit = remember(pagerState, coroutineScope) {
         { page ->
@@ -132,102 +115,53 @@ fun MainScreen(
         LocalHandlePageChange provides handlePageChange,
         LocalSelectedPage provides uiSelectedPage
     ) {
-        val content = @Composable { paddingBottom: Dp ->
-            HorizontalPagerWithInteraction(
-                enableGestureOverride = false,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pagerGestureOverride(
-                        pagerState = pagerState,
-                        mode = pagerMode,
-                        enabled = userScrollEnabled,
-                    ),
-                state = pagerState,
-                userScrollEnabled = userScrollEnabled && !interceptPagerGestures,
-                beyondViewportPageCount = 1,
-                pageNestedScrollConnection = if (interceptPagerGestures) {
-                    PagerGestureNestedScrollConnection
-                } else {
-                    PagerDefaults.pageNestedScrollConnection(
-                        state = pagerState,
-                        orientation = androidx.compose.foundation.gestures.Orientation.Horizontal,
-                    )
-                },
-                flingBehavior = PagerDefaults.flingBehavior(
-                    state = pagerState,
-                    snapAnimationSpec = PagerNavigationSpringSpec,
-                ),
-            ) { pageIndex ->
-                if (pages.isEmpty()) return@HorizontalPagerWithInteraction
-
-                val snackBarHostState = remember { SnackbarHostState() }
-                CompositionLocalProvider(
-                    LocalSnackbarHost provides snackBarHostState,
-                    LocalPagerPage provides pageIndex,
-                    LocalBlurState provides rememberMaterial3BlurBackdrop(
-                        enableBlur = themeConfig.isEnableBlur,
-                        pagerState = pagerState,
-                        pagerPage = pageIndex,
-                    ),
-                ) {
-                    val destination = pages[pageIndex]
-                    destination.direction(paddingBottom)
-                }
-            }
-        }
-
-        if (LocalPortraitState.current) {
-            Scaffold(
-                // The child pages own their top-bar insets. The outer scaffold only reserves the
-                // measured bottom navigation bar height for the pager content.
-                contentWindowInsets = WindowInsets(),
-                modifier = Modifier.fillMaxSize(),
-                bottomBar = {
-                    NavigationBar(
-                        destinations = pages,
-                        isBottomBar = true,
-                    )
-                },
-                containerColor = Color.Transparent,
-            ) { innerPadding ->
-                Box(
-                    modifier = Modifier.blurSource()
-                ) {
-                    content(innerPadding.calculateBottomPadding())
-                }
-            }
-        } else {
-            var navWidth by remember { mutableIntStateOf(0) }
-            val density = LocalDensity.current
-
-            Box(
-                modifier = Modifier.fillMaxSize()
-            ) {
-                Row(
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            val isPortrait = maxWidth < maxHeight || (maxHeight / maxWidth > 1.4f)
+            val content = @Composable { paddingBottom: Dp ->
+                HorizontalPager(
                     modifier = Modifier
                         .fillMaxSize()
-                        .blurSource()
-                ) {
-                    Spacer(
-                        modifier = Modifier.width(
-                            with(density) { navWidth.toDp() }
-                        )
-                    )
+                        .blurSource(),
+                    state = pagerState,
+                    userScrollEnabled = userScrollEnabled,
+                    beyondViewportPageCount = 1,
+                ) { pageIndex ->
+                    if (pages.isEmpty()) return@HorizontalPager
 
-                    Box(Modifier.weight(1f)) {
-                        content(0.dp)
+                    val snackBarHostState = remember { SnackbarHostState() }
+                    CompositionLocalProvider(
+                        LocalSnackbarHost provides snackBarHostState,
+                        LocalBlurState provides rememberMaterial3BlurBackdrop(ThemeConfig.isEnableBlur),
+                    ) {
+                        val destination = pages[pageIndex]
+                        destination.direction(paddingBottom)
                     }
                 }
+            }
 
-                NavigationBar(
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .onSizeChanged {
-                            navWidth = it.width
-                        },
-                    destinations = pages,
-                    isBottomBar = false,
-                )
+            if (isPortrait) {
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    bottomBar = {
+                        NavigationBar(
+                            destinations = pages,
+                            isBottomBar = true,
+                        )
+                    },
+                    containerColor = Color.Transparent,
+                ) { innerPadding ->
+                    content(innerPadding.calculateBottomPadding())
+                }
+            } else {
+                Row(modifier = Modifier.fillMaxSize()) {
+                    NavigationBar(
+                        destinations = pages,
+                        isBottomBar = false,
+                    )
+                    content(0.dp)
+                }
             }
         }
     }

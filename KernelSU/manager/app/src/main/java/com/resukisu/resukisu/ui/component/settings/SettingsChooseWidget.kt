@@ -59,7 +59,6 @@ fun SettingsChooseWidget(
     foreContent: @Composable RowScope.() -> Unit = {},
     descriptionColumnContent: (@Composable ColumnScope.() -> Unit)? = null,
     afterContent: @Composable (Int) -> Unit = {},
-    emptyDialogContent: (@Composable () -> Unit)? = null,
     items: List<String> = emptyList(),
     itemDescriptions: List<String?> = emptyList(),
     range: IntRange? = null,
@@ -116,7 +115,7 @@ fun SettingsChooseWidget(
         }
     ) {}
 
-    if (showDialog && (itemsNotEmpty || emptyDialogContent != null)) {
+    if (showDialog && itemsNotEmpty) {
         Dialog(
             onDismissRequest = { dismiss() },
             properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -124,37 +123,30 @@ fun SettingsChooseWidget(
             SettingsChooseDialogFrame(
                 title = title,
                 maxHeight = maxHeight,
-                showConfirmButton = emptyDialogContent == null,
                 onDismiss = { dismiss() },
                 onConfirm = {
                     onSelectedIndexChange(currentIndex)
                     dismiss(resetSelection = false)
                 }
             ) {
-                if (emptyDialogContent != null) {
-                    item {
-                        emptyDialogContent()
-                    }
-                } else {
-                    lazySegmentColumn(displayItems, noHorizontalPadding = true) { index, item ->
-                        SettingsBaseWidget(
-                            title = item,
-                            fillMaxWidth = false,
-                            isOnBackground = false,
-                            description = itemDescriptions.getOrNull(index),
-                            selected = currentIndex == index,
-                            onClick = {
-                                currentIndex = index
-                            },
-                            leadingContent = {
-                                RadioButton(
-                                    selected = currentIndex == index,
-                                    onClick = null,
-                                )
-                            }
-                        ) {
-                            afterContent(index)
+                lazySegmentColumn(displayItems, noHorizontalPadding = true) { index, item ->
+                    SettingsBaseWidget(
+                        title = item,
+                        fillMaxWidth = false,
+                        renderBackgroundBlur = false,
+                        description = itemDescriptions.getOrNull(index),
+                        selected = currentIndex == index,
+                        onClick = {
+                            currentIndex = index
+                        },
+                        leadingContent = {
+                            RadioButton(
+                                selected = currentIndex == index,
+                                onClick = null,
+                            )
                         }
+                    ) {
+                        afterContent(index)
                     }
                 }
             }
@@ -195,7 +187,7 @@ fun SettingsChooseDialog(
                 SettingsBaseWidget(
                     title = item,
                     fillMaxWidth = false,
-                    isOnBackground = false,
+                    renderBackgroundBlur = false,
                     description = itemDescriptions.getOrNull(index),
                     selected = currentIndex == index,
                     onClick = {
@@ -311,7 +303,7 @@ fun SettingsChooseWidget(
                         title = item,
                         selected = isSelected,
                         fillMaxWidth = false,
-                        isOnBackground = false,
+                        renderBackgroundBlur = false,
                         description = itemDescriptions.getOrNull(index),
                         onClick = {
                             if (isSelected) {
@@ -340,7 +332,6 @@ fun SettingsChooseWidget(
 private fun SettingsChooseDialogFrame(
     title: String,
     maxHeight: Dp?,
-    showConfirmButton: Boolean = true,
     footerStartContent: (@Composable () -> Unit)? = null,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
@@ -392,10 +383,8 @@ private fun SettingsChooseDialogFrame(
                 TextButton(onClick = onDismiss) {
                     Text(text = stringResource(id = R.string.cancel))
                 }
-                if (showConfirmButton) {
-                    TextButton(onClick = onConfirm) {
-                        Text(text = stringResource(id = R.string.ok))
-                    }
+                TextButton(onClick = onConfirm) {
+                    Text(text = stringResource(id = R.string.ok))
                 }
             }
         }

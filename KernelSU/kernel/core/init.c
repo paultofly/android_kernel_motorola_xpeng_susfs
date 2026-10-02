@@ -3,9 +3,8 @@
 #include <linux/kobject.h>
 #include <linux/module.h>
 #include <linux/rcupdate.h>
-#ifndef MODULE
+#include <generated/utsrelease.h>
 #include <generated/compile.h>
-#endif
 #include <linux/version.h> /* LINUX_VERSION_CODE, KERNEL_VERSION macros */
 #include <linux/moduleparam.h>
 
@@ -32,7 +31,6 @@
 #include "feature/sulog.h"
 #include "feature/adb_root.h"
 #include "feature/dynamic_manager.h"
-#include "feature/module_load_filter.h"
 #include "feature/sucompat.h"
 #include "feature/selinux_hide.h"
 #include "infra/symbol_resolver.h"
@@ -141,11 +139,9 @@ static inline void __exit ksu_hook_exit(void)
 void setup_ksu_cred(void)
 {
     setup_ksu_cred_selinux();
-    if (init_session_keyring == NULL) {
-        init_session_keyring = ksu_get_session_keyring(current_cred());
-    }
-
+#ifdef KSU_COMPAT_REQUIRE_SESSION_KEYRING
     setup_ksu_cred_session_keyring();
+#endif
 }
 
 #ifdef CONFIG_KSU_DEBUG
@@ -157,33 +153,9 @@ bool allow_shell = false;
 bool ksu_no_custom_rc = false;
 module_param_named(norc, ksu_no_custom_rc, bool, 0);
 
-#ifdef MODULE
-bool ksu_bundled = false;
-module_param_named(bundled, ksu_bundled, bool, 0);
-#endif
-
-char ksu_block_modules[256];
-module_param_string(block_modules, ksu_block_modules, sizeof(ksu_block_modules), 0);
-MODULE_PARM_DESC(block_modules, "Comma-separated preset module names to acknowledge without loading");
-
 int __init kernelsu_init(void)
 {
-    // clang-format off
-    
-    // ddk in x86-64 doesn't have generated/compile.h
-    // manually ifdef in there...
-#ifdef MODULE
-    #if defined(__x86_64__) 
-        pr_info("Initialized with driver version: %u, full_version: %s, ABI: x86-64, Work mode: LKM\n", KSU_VERSION, KSU_VERSION_FULL);
-    #elif defined(CONFIG_ARM64)
-        pr_info("Initialized with driver version: %u, full_version: %s, ABI: aarch64, Work mode: LKM\n", KSU_VERSION, KSU_VERSION_FULL);
-    #else
-        #error Unsupported arch!
-    #endif
-#else
-    pr_info("Initialized with driver version: %u, full_version: %s, ABI: %s, Work mode: Built-in\n", KSU_VERSION, KSU_VERSION_FULL, UTS_MACHINE);
-#endif
-    // clang-format on
+    pr_info("Initialized on: %s (%s) with driver version: %u\n", UTS_RELEASE, UTS_MACHINE, KSU_VERSION);
 
 #ifdef MODULE
     ksu_late_loaded = (current->pid != 1);
@@ -229,7 +201,6 @@ int __init kernelsu_init(void)
     ksu_cred = prepare_creds();
     if (!ksu_cred) {
         pr_err("prepare cred failed!\n");
-        return -ENOSYS;
     }
 
     ksu_init_symbol_resolver();
@@ -240,7 +211,6 @@ int __init kernelsu_init(void)
     ksu_selinux_hide_init();
 
     ksu_supercalls_init();
-    ksu_app_profile_init();
 
     ksu_setuid_hook_init();
     ksu_sucompat_init();
@@ -269,7 +239,7 @@ int __init kernelsu_init(void)
         ksu_file_wrapper_init();
 
         ksu_boot_completed = true;
-        track_throne(TRACK_THRONE_FORCE_SYNCHRONOUS);
+        track_throne(TRACK_THRONE_FORCE_SEARCH_MGR);
 
         if (!getenforce()) {
             pr_info("Permissive SELinux, enforcing\n");
@@ -278,8 +248,6 @@ int __init kernelsu_init(void)
 #endif
     } else {
         ksu_hook_init();
-
-        ksu_module_load_filter_hook_init();
 
         ksu_allowlist_init();
 
@@ -320,9 +288,10 @@ void __exit kernelsu_exit(void)
     ksu_adb_root_exit();
     ksu_sulog_exit();
     ksu_feature_exit();
-    ksu_module_load_filter_hook_exit();
 
-    put_cred(ksu_cred);
+    if (ksu_cred) {
+        put_cred(ksu_cred);
+    }
 }
 
 #if NEED_OWN_STACKPROTECTOR

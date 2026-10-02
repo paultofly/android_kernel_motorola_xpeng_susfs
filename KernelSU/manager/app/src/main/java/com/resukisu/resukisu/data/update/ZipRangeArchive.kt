@@ -29,7 +29,7 @@ data class ZipEntryMetadata(
 )
 
 class ZipRangeArchive(
-    client: OkHttpClient,
+    private val client: OkHttpClient,
 ) {
 
     private val archiveClient = client.newBuilder()
@@ -80,7 +80,7 @@ class ZipRangeArchive(
             } else {
                 extractFullArchive(url, entry.name, target, onProgress)
             }
-        } catch (_: ZipRangeUnsupportedException) {
+        } catch (error: ZipRangeUnsupportedException) {
             extractFullArchive(url, entry.name, target, onProgress)
         }
     }

@@ -33,38 +33,6 @@ Repository implementations belong under `com.resukisu.resukisu.data` and its sub
 persistence, data loading, mapping, and repository concerns in this layer. Do not embed UI
 composition or presentation-only behavior in repositories.
 
-### Koin dependency injection
-
-Dependency injection is configured in `com.resukisu.resukisu.di.AppModules` and started by the
-application. Keep registrations in the existing module groups:
-
-* `coreModule` contains process-wide infrastructure and qualified shared scopes;
-* `repositoryModule` contains repository and data-source implementations;
-* `useCaseModule` contains domain use cases and wires them to repositories;
-* `viewModelModule` contains screen ViewModels, including parameterized ViewModels.
-
-Use constructor injection for new classes. Register a new dependency in the module matching its
-layer, and use `single` for shared stateless or repository objects, `factory` for short-lived
-use-case objects, and `viewModel`/`viewModelOf` for ViewModels. Reuse existing qualifiers such as
-`applicationScopeQualifier`; do not create a second Koin container or resolve dependencies with
-manual service locators.
-
-Compose screens obtain dependencies with `koinInject<T>()` and ViewModels with `koinViewModel<T>()`.
-Parameterized ViewModels must use Koin parameters (`parametersOf`) at the screen boundary. Keep
-Koin lookup out of repositories and use cases; their dependencies belong in constructors so the
-domain and data layers remain directly testable.
-
-### Repository and use-case boundaries
-
-Repositories live under `com.resukisu.resukisu.data` and own persistence, platform access,
-networking, caching, and data-source coordination. Use cases live under
-`com.resukisu.resukisu.domain.usecase` and expose one focused domain operation by composing
-repositories and other domain dependencies. ViewModels orchestrate use cases and expose UI state;
-screens and reusable components render that state and send intents back to the ViewModel.
-
-Keep the dependency direction `ui/viewmodel -> domain/usecase -> data/repository`. Do not make a
-repository depend on a ViewModel or UI component, and do not move repository work into a screen.
-
 ---
 
 ## UI component conventions
@@ -152,9 +120,7 @@ When changing user-visible wording:
 
 * add or update the appropriate Android resource;
 * preserve existing formatting placeholders and plural behavior;
-* update the English default resources in `values/` and the Simplified Chinese resources in
-  `values-zh-rCN/` for every user-visible string change;
-* other locales may be updated independently and are not a requirement for completing a change;
+* update every maintained locale required by the project;
 * avoid embedding translated text in code, previews, or component defaults.
 
 ### Compose resource access
@@ -182,9 +148,6 @@ instead.
   surfaces.
 * Extend the nearest existing pattern before creating a new abstraction.
 * Avoid duplicating existing widgets, shapes, or resource-access patterns.
-* Use `com.resukisu.resukisu.ui.component.HorizontalPagerWithInteraction` for every pager. Do not
-  call
-  `HorizontalPager` directly from screens; pager gesture arbitration belongs in this component.
 
 ---
 
@@ -207,17 +170,15 @@ For implementation tasks:
 
 Before completing a UI or settings task, verify:
 
-* Reusable components are under `com.resukisu.resukisu.ui.component`, unless it from library, if so,
-  you MUST keep the original copyright notice.
+* Reusable components are under `com.resukisu.resukisu.ui.component`.
 * Settings screens use `com.resukisu.resukisu.ui.component.settings` components.
 * Static settings groups use `SegmentedColumn`; runtime-changing groups use `LazySegmentedColumn`.
 * Standard settings rows use the relevant `SettingsBaseWidget` wrapper instead of a hand-built
   equivalent.
 * Dynamic corner-shape animation uses `AnimatedShape.kt` when applicable.
-* Every pager is rendered through `HorizontalPagerWithInteraction`.
 * No user-visible string is hardcoded.
 * Compose strings use `stringResource` whenever possible.
 * Verify the project with `./gradlew assembleRelease` before reporting completion.
 * Any build or test result is reported honestly; never claim verification passed when it was not
   run.
-* Ensure any lint rule checks passed.
+* Ensure any custom lint checks passed.

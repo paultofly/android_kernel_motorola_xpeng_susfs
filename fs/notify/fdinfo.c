@@ -15,7 +15,7 @@
 #include <linux/exportfs.h>
 #ifdef CONFIG_KSU_SUSFS
 #include <linux/susfs_def.h>
-#endif // #ifdef CONFIG_KSU_SUSFS
+#endif
 
 #include "inotify/inotify.h"
 #include "fdinfo.h"
@@ -96,10 +96,13 @@ static void show_mark_fhandle(struct seq_file *m, struct inode *inode)
 static void inotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark, struct file *file)
 #else
 static void inotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark)
-#endif // #if defined(CONFIG_KSU_SUSFS_SUS_MOUNT) || defined(CONFIG_KSU_SUSFS_SUS_KSTAT)
+#endif
 {
 	struct inotify_inode_mark *inode_mark;
 	struct inode *inode;
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+	struct mount *mnt = NULL;
+#endif
 
 	if (mark->connector->type != FSNOTIFY_OBJ_TYPE_INODE)
 		return;
@@ -124,41 +127,40 @@ static void inotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark)
 			}
 		}
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-		if (likely(susfs_is_current_proc_umounted())) {
-			struct mount *mnt = real_mount(file->f_path.mnt);
-			if (mnt->mnt_id >= DEFAULT_KSU_MNT_ID) {
-				struct path path;
-				char *pathname = kmalloc(PAGE_SIZE, GFP_KERNEL);
-				char *dpath;
-				if (!pathname) {
-					goto orig_flow;
-				}
-				dpath = d_path(&file->f_path, pathname, PAGE_SIZE);
-				if (!dpath) {
-					goto out_kfree;
-				}
-				if (kern_path(dpath, 0, &path)) {
-					goto out_kfree;
-				}
-				if (!d_backing_inode(path.dentry)) {
-					goto out_path_put;
-				}
-				seq_printf(m, "inotify wd:%x ino:%lx sdev:%x mask:%x ignored_mask:0 ",
-						inode_mark->wd, d_backing_inode(path.dentry)->i_ino, d_backing_inode(path.dentry)->i_sb->s_dev,
-						inotify_mark_user_mask(mark));
-				show_mark_fhandle(m, d_backing_inode(path.dentry));
-				seq_putc(m, '\n');
-				path_put(&path);
-				kfree(pathname);
-				iput(inode);
-				return;
-out_path_put:
-				path_put(&path);
-out_kfree:
-				kfree(pathname);
+		mnt = real_mount(file->f_path.mnt);
+		if (likely(susfs_is_current_proc_umounted()) &&
+			mnt->mnt_id >= DEFAULT_KSU_MNT_ID)
+		{
+			struct path path;
+			char *pathname = kmalloc(PAGE_SIZE, GFP_KERNEL);
+			char *dpath;
+			if (!pathname) {
+				goto orig_flow;
 			}
+			dpath = d_path(&file->f_path, pathname, PAGE_SIZE);
+			if (!dpath) {
+				goto out_kfree;
+			}
+			if (kern_path(dpath, 0, &path)) {
+				goto out_kfree;
+			}
+			if (!d_backing_inode(path.dentry)) {
+				goto out_path_put;
+			}
+			seq_printf(m, "inotify wd:%x ino:%lx sdev:%x mask:%x ignored_mask:0 ",
+					inode_mark->wd, d_backing_inode(path.dentry)->i_ino, d_backing_inode(path.dentry)->i_sb->s_dev,
+					inotify_mark_user_mask(mark));
+			show_mark_fhandle(m, d_backing_inode(path.dentry));
+			seq_putc(m, '\n');
+			path_put(&path);
+			kfree(pathname);
+			iput(inode);
+			return;
+out_path_put:
+			path_put(&path);
+out_kfree:
+			kfree(pathname);
 		}
 orig_flow:
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
@@ -180,7 +182,11 @@ void inotify_show_fdinfo(struct seq_file *m, struct file *f)
 
 #ifdef CONFIG_FANOTIFY
 
+#if defined(CONFIG_KSU_SUSFS_SUS_MOUNT) || defined(CONFIG_KSU_SUSFS_SUS_KSTAT)
+static void fanotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark, struct file *file)
+#else
 static void fanotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark)
+#endif
 {
 	unsigned int mflags = 0;
 	struct inode *inode;

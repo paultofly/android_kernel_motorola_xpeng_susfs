@@ -19,14 +19,18 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -75,17 +79,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.resukisu.resukisu.R
-import com.resukisu.resukisu.domain.model.CatalogModule
-import com.resukisu.resukisu.domain.model.ModuleRelease
-import com.resukisu.resukisu.domain.model.ModuleReleaseAsset
-import com.resukisu.resukisu.domain.usecase.EnqueueDownloadUseCase
-import com.resukisu.resukisu.domain.usecase.ObserveDownloadUseCase
 import com.resukisu.resukisu.ui.activity.PermissionRequestInterface
 import com.resukisu.resukisu.ui.component.ConfirmResult
 import com.resukisu.resukisu.ui.component.GithubMarkdown
-import com.resukisu.resukisu.ui.component.HorizontalPagerWithInteraction
 import com.resukisu.resukisu.ui.component.SwipeableSnackbarHost
 import com.resukisu.resukisu.ui.component.rememberConfirmDialog
 import com.resukisu.resukisu.ui.component.settings.AppBackButton
@@ -101,50 +98,20 @@ import com.resukisu.resukisu.ui.theme.blurSource
 import com.resukisu.resukisu.ui.theme.renderBackgroundBlur
 import com.resukisu.resukisu.ui.util.LocalPermissionRequestInterface
 import com.resukisu.resukisu.ui.util.LocalSnackbarHost
-import com.resukisu.resukisu.ui.util.adaptiveScaffoldWindowInsets
-import com.resukisu.resukisu.ui.viewmodel.ModuleDetailUiAction
-import com.resukisu.resukisu.ui.viewmodel.ModuleDetailViewModel
+import com.resukisu.resukisu.ui.util.module.ReleaseAssetInfo
+import com.resukisu.resukisu.ui.util.module.ReleaseInfo
+import com.resukisu.resukisu.ui.viewmodel.ModuleRepoViewModel
 import com.resukisu.resukisu.ui.viewmodel.formatFileSize
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import org.koin.androidx.compose.koinViewModel
-import org.koin.compose.koinInject
-import org.koin.core.parameter.parametersOf
 
 /**
  * @author AlexLiuDev233
  * @date 2025/12/7
  */
-
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun OnlineModuleDetailScreen(moduleId: String) {
-    val viewModel = koinViewModel<ModuleDetailViewModel>(parameters = { parametersOf(moduleId) })
-    val state by viewModel.state.collectAsStateWithLifecycle()
-    val module = state.module
-    if (module == null) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            if (state.loading) {
-                LoadingIndicator()
-            } else {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(stringResource(R.string.please_check_network))
-                    FilledTonalButton(onClick = { viewModel.dispatch(ModuleDetailUiAction.Retry) }) {
-                        Text(stringResource(R.string.network_retry))
-                    }
-                }
-            }
-        }
-        return
-    }
-    OnlineModuleDetailContent(module)
-}
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun OnlineModuleDetailContent(module: CatalogModule) {
-    val themeConfig: ThemeConfig = koinInject()
-    val cardConfig: CardConfig = koinInject()
+fun OnlineModuleDetailScreen(module: ModuleRepoViewModel.RepoModule) {
     val navigator = LocalNavigator.current
     val snackBarHost = LocalSnackbarHost.current
     val topAppBarState = rememberTopAppBarState()
@@ -163,7 +130,8 @@ private fun OnlineModuleDetailContent(module: CatalogModule) {
     Scaffold(
         topBar = {
             Column(
-                modifier = Modifier.blurEffect()
+                modifier = Modifier.blurEffect(
+                )
             ) {
                 LargeFlexibleTopAppBar(
                     title = { Text(module.moduleName) },
@@ -189,15 +157,15 @@ private fun OnlineModuleDetailContent(module: CatalogModule) {
                     },
                     colors = TopAppBarDefaults.topAppBarColors().copy(
                         containerColor =
-                            if (themeConfig.isEnableBlur)
+                            if (ThemeConfig.isEnableBlur)
                                 Color.Transparent
                             else
-                                MaterialTheme.colorScheme.surfaceContainer.copy(cardConfig.cardAlpha),
+                                MaterialTheme.colorScheme.surfaceContainer.copy(CardConfig.cardAlpha),
                         scrolledContainerColor =
-                            if (themeConfig.isEnableBlur)
+                            if (ThemeConfig.isEnableBlur)
                                 Color.Transparent
                             else
-                                MaterialTheme.colorScheme.surfaceContainer.copy(cardConfig.cardAlpha)
+                                MaterialTheme.colorScheme.surfaceContainer.copy(CardConfig.cardAlpha)
                     ),
                     windowInsets = TopAppBarDefaults.windowInsets.add(WindowInsets(left = 12.dp)),
                 )
@@ -205,10 +173,10 @@ private fun OnlineModuleDetailContent(module: CatalogModule) {
                 PrimaryTabRow(
                     selectedTabIndex = pagerState.currentPage,
                     containerColor =
-                        if (themeConfig.isEnableBlur)
+                        if (ThemeConfig.isEnableBlur)
                             Color.Transparent
                         else
-                            MaterialTheme.colorScheme.surfaceContainer.copy(cardConfig.cardAlpha),
+                            MaterialTheme.colorScheme.surfaceContainer.copy(CardConfig.cardAlpha),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     tabTitles.forEachIndexed { index, title ->
@@ -236,7 +204,9 @@ private fun OnlineModuleDetailContent(module: CatalogModule) {
         },
         containerColor = Color.Transparent,
         contentColor =  MaterialTheme.colorScheme.onSurface,
-        contentWindowInsets = adaptiveScaffoldWindowInsets(),
+        contentWindowInsets = WindowInsets.safeDrawing.only(
+            WindowInsetsSides.Top + WindowInsetsSides.Horizontal
+        ),
         snackbarHost = { SwipeableSnackbarHost(hostState = snackBarHost) }
     ) { innerPadding ->
         Column(
@@ -246,7 +216,7 @@ private fun OnlineModuleDetailContent(module: CatalogModule) {
                 .blurSource()
         ) {
 
-            HorizontalPagerWithInteraction(
+            HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize()
             ) { page ->
@@ -269,7 +239,7 @@ private fun OnlineModuleDetailContent(module: CatalogModule) {
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun InfoTab(
-    module: CatalogModule,
+    module: ModuleRepoViewModel.RepoModule,
     nestedScrollConnection: NestedScrollConnection,
     innerPadding: PaddingValues
 ) {
@@ -333,7 +303,7 @@ fun InfoTab(
 
 @Composable
 fun ReleasesTab(
-    module: CatalogModule,
+    module: ModuleRepoViewModel.RepoModule,
     nestedScrollConnection: NestedScrollConnection,
     coroutineScope: CoroutineScope,
     innerPadding: PaddingValues,
@@ -362,12 +332,10 @@ fun ReleasesTab(
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ReadmeTab(
-    module: CatalogModule,
+    module: ModuleRepoViewModel.RepoModule,
     nestedScrollConnection: NestedScrollConnection,
     innerPadding: PaddingValues
 ) {
-    val themeConfig: ThemeConfig = koinInject()
-    val cardConfig: CardConfig = koinInject()
     val loading = remember { mutableStateOf(true) }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -387,10 +355,10 @@ fun ReadmeTab(
                         .clip(RoundedCornerShape(16.dp))
                         .renderBackgroundBlur(),
                     color =
-                        if (themeConfig.isEnableBlurExp)
+                        if (ThemeConfig.isEnableBlurExp)
                             Color.Transparent
                         else
-                            MaterialTheme.colorScheme.surfaceBright.copy(cardConfig.cardAlpha),
+                            MaterialTheme.colorScheme.surfaceBright.copy(CardConfig.cardAlpha),
                 ) {
                     GithubMarkdown(
                         content = module.readme,
@@ -440,17 +408,13 @@ fun ReadmeTab(
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ReleaseCard(
-    module: CatalogModule,
-    release: ModuleRelease,
+    module: ModuleRepoViewModel.RepoModule,
+    release: ReleaseInfo,
     coroutineScope: CoroutineScope
 ) {
-    val themeConfig: ThemeConfig = koinInject()
-    val cardConfig: CardConfig = koinInject()
     val navigator = LocalNavigator.current
     val context = LocalContext.current
     val permissionRequestInterface = LocalPermissionRequestInterface.current
-    val enqueueDownload = koinInject<EnqueueDownloadUseCase>()
-    val observeDownload = koinInject<ObserveDownloadUseCase>()
     val confirmInstallTitle =
         stringResource(R.string.confirm_install_module_title, module.moduleName)
     val confirmDialog = rememberConfirmDialog()
@@ -463,10 +427,10 @@ fun ReleaseCard(
             .renderBackgroundBlur(MaterialTheme.colorScheme.surfaceBright),
         shape = RoundedCornerShape(16.dp),
         color =
-            if (themeConfig.isEnableBlurExp)
+            if (ThemeConfig.isEnableBlurExp)
                 Color.Transparent
             else
-                MaterialTheme.colorScheme.surfaceBright.copy(cardConfig.cardAlpha),
+                MaterialTheme.colorScheme.surfaceBright.copy(CardConfig.cardAlpha),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -529,9 +493,7 @@ fun ReleaseCard(
                                 module,
                                 assetInfo,
                                 navigator,
-                                coroutineScope,
-                                enqueueDownload,
-                                observeDownload,
+                                coroutineScope
                             )
                         }
                     }
@@ -547,9 +509,7 @@ fun ReleaseCard(
                         description = stringResource(R.string.assert_support_content).format(
                             formatFileSize(assetInfo.size),
                             assetInfo.downloadCount
-                        ),
-                        isOnBackground = false,
-                        containerColor = Color.Transparent,
+                        )
                     ) {
                         FilledTonalButton(
                             onClick = onClick,
@@ -618,14 +578,14 @@ fun CollapsibleContent(
 @Composable
 @Preview
 fun ReleaseCardPreview() {
-    val release = ModuleRelease(
+    val release = ReleaseInfo(
         name = "name",
         tagName = "tagName",
         publishedAt = "publishedAt",
         descriptionHTML = "descriptionHTML",
-        assets = ArrayList<ModuleReleaseAsset>().apply {
+        assets = ArrayList<ReleaseAssetInfo>().apply {
             add(
-                ModuleReleaseAsset(
+                ReleaseAssetInfo(
                     name = "name",
                     downloadUrl = "downloadUrl",
                     size = 0,
@@ -633,7 +593,7 @@ fun ReleaseCardPreview() {
                 )
             )
             add(
-                ModuleReleaseAsset(
+                ReleaseAssetInfo(
                     name = "name2",
                     downloadUrl = "downloadUrl2",
                     size = 0,
@@ -646,7 +606,7 @@ fun ReleaseCardPreview() {
     val fakeModule = initFakeRepoModuleForPreview()
 
     CompositionLocalProvider(
-        LocalNavigator provides Navigator(Route.ModuleRepoDetail(fakeModule.moduleId)),
+        LocalNavigator provides Navigator(Route.ModuleRepoDetail(fakeModule)),
         LocalPermissionRequestInterface provides object : PermissionRequestInterface {
             override fun requestPermission(
                 permission: String,

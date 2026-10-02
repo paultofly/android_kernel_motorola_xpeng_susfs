@@ -5,8 +5,9 @@
 
 #ifdef __x86_64__
 
-#include <linux/cache.h>
 #include "asm/text-patching.h" // IWYU pragma: keep
+
+#include <linux/cache.h>
 #include "../patch_memory.h"
 #include "klog.h" // IWYU pragma: keep
 #include <linux/cpumask.h>
@@ -213,12 +214,6 @@ int ksu_patch_text(void *dst, void *src, size_t len, int flags)
     };
 
     return stop_machine(ksu_patch_text_cb, &info, cpu_online_mask);
-}
-
-// TODO:
-void *scan_call_to(void *start, size_t size, void *target)
-{
-    return NULL;
 }
 
 #endif /* __x86_64__ */
