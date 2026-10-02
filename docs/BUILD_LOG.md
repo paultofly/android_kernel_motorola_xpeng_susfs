@@ -326,3 +326,79 @@ fastboot flash boot boot_ksu.img
   `fs/nomount/*`、`fs/{Kconfig,Makefile}`、`lib/lz4k/*`、`include/linux/lz4k.h`、`lib/{Kconfig,Makefile}`、`arch/arm64/configs/vendor/ext_config/moto-lahaina-xpeng.config`。
 - 文档:`docs/FEATURE_PORTS.md`、`docs/BUILD_LOG.md`(本节)、`docs/edge-s30.config`、`docs/SHA256SUMS.txt`、`docs/xpeng_build6_features.log.xz`。
 - 构建仓:`scripts/ci/build_resukisu_boot.sh` 新增 `INCREMENTAL` / `CONFIG_ONLY` 开关。
+## 十一、第三轮: 移动数据有信号无网络 —— 根因定位与 RMNET 内建修复 (2026-10-02)
+
+### 11.1 症状
+
+刷入特性版后开机正常, 移动网络有信号, 打开数据开关无数据连接, 无法上网。
+
+### 11.2 排除过程(共 4 轮构建)
+
+| 轮次 | 假设 | 结果 |
+|------|------|------|
+| 第2轮 | BBR 默认拥塞控制与 rmnet 不兼容 | ❌ 改回 cubic 后故障依旧 |
+| 第2.5轮 | TCP 组(BBRv3/Brutal/fq)代码副作用 | ❌ 完全 revert TCP 组后故障依旧 |
+| 第3轮 | USER_NS/NoMount/LZ4K 之一 | ❌ 纯净基线+三项仍故障(设备实测) |
+
+### 11.3 真凶: vendor rmnet_core.ko 加载失败
+
+设备侧 adb 取证(决定性证据):
+
+```
+$ ip link | grep rmnet
+rmnet_ipa0: <UP,LOWER_UP> ... qdisc pfifo_fast        # 链路层正常
+$ cat /proc/net/dev | grep rmnet
+rmnet_ipa0: 0 0 0 0 ...                                 # RX/TX 全 0
+$ lsmod | grep rmnet
+rmnet_ctl  20480  0                                     # 只有 ctl, 缺 rmnet_core
+$ su 0 insmod /vendor/lib/modules/rmnet_core.ko
+insmod: failed: Invalid argument
+dmesg: rmnet_core: disagrees about version of symbol rtnl_link_register
+dmesg: rmnet_core: Unknown symbol rtnl_link_register (err -22)
+```
+
+机制: `/vendor/lib/modules/rmnet_core.ko` 是为 stock 5.4.210 内核编译的模块;
+我们的内核(5.4.302-moto, 无论是否加新特性)无法加载它 → rmnet_ipa0 由 IPA3(内建)
+创建所以接口存在, 但 QMAP 解复用数据面(rmnet_core)从未工作 → 有信号、零收发。
+
+注意: vendor 模块 __versions 段期望的 CRC (rtnl_link_register=0xddf5d971) 与我们
+Module.symvers 完全一致, 但运行时校验仍失败; v4.1.0 能用的真实原因是它连同
+vendor 分区一起被用户刷入/或未触发同样的校验路径。与 USER_NS/NoMount/LZ4K/
+BBRv3/Brutal/fq 全部无关 —— 它们均在第二轮后被逐一排除。
+
+### 11.4 修复
+
+techpack 的 `techpack/datarmnet/core/Kbuild` 硬编码 `obj-m`(不读 CONFIG_RMNET_*
+符号, 该符号在 .config 中不存在), 改为 `obj-y` 将树内 rmnet_core/rmnet_ctl 内建,
+彻底绕开 vendor 模块加载(commit 159a741fc7e9)。rmnet_offload/rmnet_shs 保持模块
+(可选加速, vendor 分区原版加载失败不影响基本数据)。
+
+### 11.5 构建与验证(full 全量, BUILD_WLAN=false)
+
+- HEAD: `159a741fc7e9` (tag `susfs2.3-droidspace-rekernel`)
+- 时间: 10:50:02 → 11:15:34, 约 25 分钟(含 ThinLTO 链接)
+- 编译日志确认: `CC techpack/datarmnet/core/rmnet_*.o`(无 [M], 内建) + `built-in.a`
+- MODPOST 79 modules(较 81 少 2: rmnet_core/rmnet_ctl 已内建)
+
+| 验证项 | 结果 |
+|--------|------|
+| `kernel.release` | ✅ `5.4.302-moto` |
+| vmlinux rmnet 符号 | ✅ 876 个(含 `rmnet_init`) |
+| rmnet_core.ko/rmnet_ctl.ko | ✅ 不再作为模块生成(0 个) |
+| rmnet_offload.ko/rmnet_shs.ko | ✅ 仍为模块(可选加速) |
+| boot 内嵌内核 == Image | ✅ SHA-256 逐字节一致 |
+| USER_NS/NOMOUNT/LZ4K/cubic | ✅ 保持不变 |
+
+### 11.6 产物
+
+| 文件 | SHA-256 |
+|------|---------|
+| `boot_ksu.img` (96M) | `f2f3b8a12de297734366bd8642386d8d73dfc2957bbec6c4e2963bbf9713209c` |
+| `Image` (42M) | `afa83cb784461932ea8bddb53a5fae1569c6986c2d1697f8bf48b0a83564eacc` |
+
+### 11.7 刷入后预期
+
+- 开机后 `lsmod | grep rmnet` 应为空或仅 rmnet_offload/shs(若 vendor 版可载)
+- `cat /proc/net/dev | grep rmnet` 开数据后 RX/TX 应增长
+- dmesg 可能出现 vendor rmnet_core.ko insmod 失败日志(modules.load 仍会尝试),
+  属预期噪音, 不影响功能(内核已内建)
