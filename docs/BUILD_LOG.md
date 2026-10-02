@@ -402,3 +402,8 @@ techpack 的 `techpack/datarmnet/core/Kbuild` 硬编码 `obj-m`(不读 CONFIG_RM
 - `cat /proc/net/dev | grep rmnet` 开数据后 RX/TX 应增长
 - dmesg 可能出现 vendor rmnet_core.ko insmod 失败日志(modules.load 仍会尝试),
   属预期噪音, 不影响功能(内核已内建)
+
+### 11.8 实测结果 (2026-10-02 用户确认)
+
+✅ **刷入后移动数据已恢复** —— 开机正常, 有信号, 数据开关打开后可正常上网。
+根因(vendor rmnet_core.ko 符号校验失败)与修复(树内 rmnet 内建)得到实测确认。
